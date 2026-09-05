@@ -24,7 +24,7 @@ func (fh *FleetHanlder) CreateFleets(c *gin.Context) {
 	)
 	defer span.End()
 
-	bindSpan, _ := fh.trace.StartSpan(ctx, "equipments.create_equipment.BindJson", nil)
+	bindSpan, _ := fh.trace.StartSpan(ctx, "fleets.create_fleets.BindJson", nil)
 	err := c.ShouldBindJSON(&request)
 	bindSpan.End()
 
@@ -49,11 +49,11 @@ func (fh *FleetHanlder) CreateFleets(c *gin.Context) {
 	database := fh.db
 	dbSpan.End()
 
-	operationSpan, _ := fh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
-		"db.name":              "equipments",
+	operationSpan, _ := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+		"db.name":              "fleets",
 		"db.operation":         "insert",
-		"equipments.code":      fleet.Code,
-		"equipments.createdAt": fleet.CreatedAt,
+		"fleets.code":      fleet.Code,
+		"fleets.createdAt": fleet.CreatedAt,
 	})
 	defer operationSpan.End()
 

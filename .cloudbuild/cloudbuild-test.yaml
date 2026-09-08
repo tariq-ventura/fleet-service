@@ -4,7 +4,7 @@ options:
 
 steps:
   - name: 'golang:1.27'
-    id: 'Go Mod Download'
+    id: 'Go Mod Download Fleet Service'
     entrypoint: 'bash'
     args:
       - '-c'
@@ -12,7 +12,7 @@ steps:
         go mod download
   
   - name: 'golang:1.27'
-    id: 'Go Vulnerability Check'
+    id: 'Go Vulnerability Check Fleet Service'
     entrypoint: 'bash'
     args:
       - '-c'

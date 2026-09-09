@@ -1,0 +1,78 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: fleet-service-development
+  namespace: 534053084464
+  selfLink: /apis/serving.knative.dev/v1/namespaces/534053084464/services/fleet-service-development
+  uid: 77d73afc-9011-4405-8656-79bbd5c97872
+  resourceVersion: AAZbDu2tsFo
+  generation: 5
+  creationTimestamp: "2026-09-09T02:02:05.138641Z"
+  labels:
+    run.googleapis.com/satisfiesPzs: "true"
+    cloud.googleapis.com/location: us-east4
+  annotations:
+    serving.knative.dev/creator: tariqventura@gmail.com
+    serving.knative.dev/lastModifier: tariqventura@gmail.com
+    run.googleapis.com/client-name: cloud-console
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+    run.googleapis.com/operation-id: b1a726b0-1675-4c62-97e4-7eee6c8dee21
+    run.googleapis.com/ingress-status: internal-and-cloud-load-balancing
+    run.googleapis.com/invoker-iam-disabled: "true"
+    run.googleapis.com/maxScale: 5
+    run.googleapis.com/urls: "[\"https://fleet-service-development-534053084464.us-east4.run.app\"\
+      ,\"https://fleet-service-development-4tqk6nxafq-uk.a.run.app\"]"
+spec:
+  template:
+    metadata:
+      labels:
+        client.knative.dev/nonce: 695e1d88-794d-464e-9028-267593d4ddfa
+        run.googleapis.com/startupProbeType: Default
+      annotations:
+        run.googleapis.com/sessionAffinity: "false"
+        run.googleapis.com/vpc-access-egress: all-traffic
+        autoscaling.knative.dev/minScale: 0
+        run.googleapis.com/cloudsql-instances: minecraft-server-501415:us-east4:entropy
+        autoscaling.knative.dev/maxScale: 5
+        run.googleapis.com/network-interfaces: "[{\"network\":\"entropy-vpc-development\"\
+          ,\"subnetwork\":\"entropy-subnet-development-01\"}]"
+        run.googleapis.com/client-name: cloud-console
+        run.googleapis.com/cpu-throttling: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: fleet-service@minecraft-server-501415.iam.gserviceaccount.com
+      containers:
+      - name: fleet-service-1
+        image: us-east4-docker.pkg.dev/minecraft-server-501415/development/fleet-service@sha256:afd2b6225f953da7f671626ace6b6ab193770d5a83231288b098beeec235a6f3
+        ports:
+        - name: http1
+          containerPort: 3000
+        env:
+        - name: DB_CONTEXT
+          value: postgresql
+        - name: SERVICE_NAME
+          value: fleet-service
+        - name: TRACE_TYPE
+          value: GCP
+        - name: GCP_PROJECT_ID
+          value: minecraft-server-501415
+        - name: DB_STRING
+          valueFrom:
+            secretKeyRef:
+              key: latest
+              name: "flee-db-development"
+        resources:
+          limits:
+            cpu: 1000m
+            memory: 128Mi
+        startupProbe:
+          timeoutSeconds: 240
+          periodSeconds: 240
+          failureThreshold: 1
+          tcpSocket:
+            port: 3000
+  traffic:
+  - percent: 100
+    latestRevision: true

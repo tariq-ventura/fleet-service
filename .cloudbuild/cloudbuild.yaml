@@ -10,17 +10,31 @@ steps:
       - '-c'
       - |
         echo "Build: $BUILD_ID | TAG: $SHORT_SHA | Branch: $BRANCH_NAME"    
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'pull-latest'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        docker pull "${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:latest" || true
 
   - name: 'gcr.io/cloud-builders/docker'
     id: 'build-image'
+    env:
+      - 'DOCKER_BUILDKIT=1'
     args:
       - 'build'
+      - '--cache-from=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:latest'
+      - '--build-arg=BUILDKIT_INLINE_CACHE=1'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:latest'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:$SHORT_SHA'
-      - './'
+      - '.'
     timeout: '1200s'
+    waitFor:
+      - 'pull-latest'
 
   - name: 'gcr.io/cloud-builders/docker'
     id: 'push-latest'

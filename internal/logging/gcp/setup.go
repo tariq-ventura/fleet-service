@@ -28,10 +28,10 @@ var NewGCPClient = func(ctx context.Context) (*GCPClient, error) {
 		return nil, err
 	}
 
-	logger := logs.Logger("candystore")
+	logger := logs.Logger("fleets-services")
 
 	errors, err := errorreporting.NewClient(ctx, projectID, errorreporting.Config{
-		ServiceName:    "candystore",
+		ServiceName:    "fleets-services",
 		ServiceVersion: "0.0.0",
 		OnError: func(err error) {
 			log.Printf("Could not report the error: %v", err)

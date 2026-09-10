@@ -1,6 +1,7 @@
 package fleets_db_postgres
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -9,8 +10,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func (pc *PostgresClient) CreateFleets(fleet fleets_domain.Fleet) *interfaces.Error {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) CreateFleets(fleet fleets_domain.Fleet, ctx context.Context) *interfaces.Error {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":          "fleets",
 		"db.operation":     "insert",
 		"db.type":          "postgresql",

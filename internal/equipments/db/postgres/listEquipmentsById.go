@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -10,8 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func (pc *PostgresClient) ListEquipmentsById(id uuid.UUID) (*equipments_domain.Equipment, *interfaces.Error) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) ListEquipmentsById(id uuid.UUID, ctx context.Context) (*equipments_domain.Equipment, *interfaces.Error) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "equipments",
 		"db.operation":  "list",
 		"db.type":       "postgresql",

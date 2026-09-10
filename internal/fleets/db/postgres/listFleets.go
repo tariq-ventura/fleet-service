@@ -1,14 +1,15 @@
 package fleets_db_postgres
 
 import (
+	"context"
 	"net/http"
 
 	fleets_domain "github.com/tariq-ventura/fleet-service/internal/fleets/domain"
 	"github.com/tariq-ventura/fleet-service/internal/interfaces"
 )
 
-func (pc *PostgresClient) ListFleets(page, pageSize int, search string) ([]fleets_domain.Fleet, *interfaces.Error, int64) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) ListFleets(page, pageSize int, search string, ctx context.Context) ([]fleets_domain.Fleet, *interfaces.Error, int64) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":         "fleets",
 		"db.operation":    "list",
 		"db.type":         "postgresql",

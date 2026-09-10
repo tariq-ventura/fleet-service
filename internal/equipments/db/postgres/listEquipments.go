@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -8,8 +9,8 @@ import (
 	"github.com/tariq-ventura/fleet-service/internal/interfaces"
 )
 
-func (pc *PostgresClient) ListEquipments(page, pageSize int, etype, status, brand, search string) ([]equipments_domain.Equipment, *interfaces.Error, int64) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) ListEquipments(page, pageSize int, etype, status, brand, search string, ctx context.Context) ([]equipments_domain.Equipment, *interfaces.Error, int64) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":           "equipments",
 		"db.operation":      "list",
 		"db.type":           "postgresql",

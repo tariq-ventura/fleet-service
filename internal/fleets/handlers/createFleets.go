@@ -49,7 +49,7 @@ func (fh *FleetHanlder) CreateFleets(c *gin.Context) {
 	database := fh.db
 	dbSpan.End()
 
-	operationSpan, _ := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+	operationSpan, opCtx := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
 		"db.name":          "fleets",
 		"db.operation":     "insert",
 		"fleets.code":      fleet.Code,
@@ -57,7 +57,7 @@ func (fh *FleetHanlder) CreateFleets(c *gin.Context) {
 	})
 	defer operationSpan.End()
 
-	result := database.CreateFleets(fleet)
+	result := database.CreateFleets(fleet, opCtx)
 
 	if result != nil {
 		c.JSON(result.StatusCode, gin.H{

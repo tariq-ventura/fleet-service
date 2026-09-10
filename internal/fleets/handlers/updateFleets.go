@@ -16,7 +16,7 @@ func (fh *FleetHanlder) UpdateFleets(c *gin.Context) {
 		return
 	}
 
-	span, _ := fh.trace.StartSpan(
+	span, spanCtx := fh.trace.StartSpan(
 		ctx,
 		"equipments.create_equipment",
 		map[string]any{
@@ -29,11 +29,16 @@ func (fh *FleetHanlder) UpdateFleets(c *gin.Context) {
 
 	var request fleets_dto.UpdateFleetRequest
 
-	if err := c.ShouldBindJSON(&request); err != nil {
-		fh.logs.LogWarning("invalid_request", map[string]any{"error": err.Error()})
+	bindSpan, bindCtx := fh.trace.StartSpan(spanCtx, "equipments.create_equipment.BindJson", nil)
+	bindError := c.ShouldBindJSON(&request)
+	bindSpan.End()
+
+	if bindError != nil {
+		fh.logs.LogWarning("invalid request", map[string]interface{}{"error": bindError.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid_request",
 			"message": "Los datos enviados no son válidos",
+			"detail":  bindError.Error(),
 		})
 		return
 	}
@@ -58,19 +63,19 @@ func (fh *FleetHanlder) UpdateFleets(c *gin.Context) {
 		return
 	}
 
-	dbSpan, dbCtx := fh.trace.StartSpan(ctx, "fleets.database.connection", map[string]any{
+	dbSpan, dbCtx := fh.trace.StartSpan(bindCtx, "fleets.database.connection", map[string]any{
 		"db.name": "fleets",
 	})
 	database := fh.db
 	dbSpan.End()
 
-	operationSpan, _ := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+	operationSpan, opCtx := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
 		"db.name":      "fleets",
 		"db.operation": "update",
 	})
 	defer operationSpan.End()
 
-	fleet, erro := database.UpdateFleets(id, updates)
+	fleet, erro := database.UpdateFleets(id, updates, opCtx)
 
 	if erro != nil {
 		c.JSON(erro.StatusCode, gin.H{

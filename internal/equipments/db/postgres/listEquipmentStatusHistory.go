@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -8,8 +9,8 @@ import (
 	"github.com/tariq-ventura/fleet-service/internal/interfaces"
 )
 
-func (pc *PostgresClient) ListEquipmentStatusHistory(id uuid.UUID) ([]equipments_domain.EquipmentStatusHistory, *interfaces.Error) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) ListEquipmentStatusHistory(id uuid.UUID, ctx context.Context) ([]equipments_domain.EquipmentStatusHistory, *interfaces.Error) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "equipments",
 		"db.operation":  "list",
 		"db.type":       "postgresql",
@@ -17,7 +18,7 @@ func (pc *PostgresClient) ListEquipmentStatusHistory(id uuid.UUID) ([]equipments
 	})
 	defer operationSpan.End()
 
-	_, err := pc.ListEquipmentsById(id)
+	_, err := pc.ListEquipmentsById(id, spanCtx)
 
 	if err != nil {
 		return nil, err

@@ -2,5 +2,6 @@ apiVersion: deploy.cloud.google.com/v1
 kind: Target
 metadata:
   name: prod-target
+  requireApproval: true
 run:
   location: projects/minecraft-server-501415/locations/us-east4

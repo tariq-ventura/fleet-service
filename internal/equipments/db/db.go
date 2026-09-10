@@ -16,7 +16,7 @@ import (
 
 type IEquipmentsDB interface {
 	AssignEquipmentFleet(fleetId, equipmentId uuid.UUID) (*equipments_domain.Equipment, *interfaces.Error)
-	CreateEquipment(data equipments_domain.Equipment) *interfaces.Error
+	CreateEquipment(data equipments_domain.Equipment, ctx context.Context) *interfaces.Error
 	ListEquipments(page, pageSize int, etype, status, brand, search string) ([]equipments_domain.Equipment, *interfaces.Error, int64)
 	ListEquipmentsById(id uuid.UUID) (*equipments_domain.Equipment, *interfaces.Error)
 	ListEquipmentStatusHistory(id uuid.UUID) ([]equipments_domain.EquipmentStatusHistory, *interfaces.Error)

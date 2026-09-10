@@ -78,13 +78,13 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 		FuelPercent: request.FuelPercent,
 	}
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.database.connection", map[string]any{
+	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.create_equipment.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
+	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.create_equipment.database.operations", map[string]any{
 		"db.name":              "equipments",
 		"db.operation":         "insert",
 		"equipments.code":      equipment.Code,
@@ -93,7 +93,7 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 	})
 	defer operationSpan.End()
 
-	result := database.CreateEquipment(equipment)
+	result := database.CreateEquipment(equipment, dbCtx)
 
 	if result != nil {
 		c.JSON(result.StatusCode, gin.H{

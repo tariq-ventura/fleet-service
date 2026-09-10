@@ -15,7 +15,7 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 	ctx := c.Request.Context()
 	var request equipments_dto.CreateEquipmentRequest
 
-	span, _ := eh.trace.StartSpan(
+	span, spanCtx := eh.trace.StartSpan(
 		ctx,
 		"equipments.create_equipment",
 		map[string]any{
@@ -25,7 +25,7 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 	)
 	defer span.End()
 
-	bindSpan, _ := eh.trace.StartSpan(ctx, "equipments.create_equipment.BindJson", nil)
+	bindSpan, bindCtx := eh.trace.StartSpan(spanCtx, "equipments.create_equipment.BindJson", nil)
 	err := c.ShouldBindJSON(&request)
 	bindSpan.End()
 
@@ -39,7 +39,7 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 		return
 	}
 
-	fleetSpan, _ := eh.trace.StartSpan(ctx, "equipments.create_equipment.validate_fleetID", nil)
+	fleetSpan, validationCtx := eh.trace.StartSpan(bindCtx, "equipments.create_equipment.validate_fleetID", nil)
 	fleetId := validations.ValidateFleetId(request.FleetID)
 	fleetSpan.End()
 
@@ -78,13 +78,13 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 		FuelPercent: request.FuelPercent,
 	}
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.create_equipment.database.connection", map[string]any{
+	dbSpan, dbCtx := eh.trace.StartSpan(validationCtx, "equipments.create_equipment.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.create_equipment.database.operations", map[string]any{
+	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.create_equipment.database.operations", map[string]any{
 		"db.name":              "equipments",
 		"db.operation":         "insert",
 		"equipments.code":      equipment.Code,
@@ -93,7 +93,7 @@ func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
 	})
 	defer operationSpan.End()
 
-	result := database.CreateEquipment(equipment, dbCtx)
+	result := database.CreateEquipment(equipment, opCtx)
 
 	if result != nil {
 		c.JSON(result.StatusCode, gin.H{

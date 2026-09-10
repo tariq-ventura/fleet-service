@@ -40,6 +40,8 @@ spec:
           value: GCP
         - name: GCP_PROJECT_ID
           value: minecraft-server-501415
+        - name: LOGGING_TYPE
+          value: GCP
         - name: DB_STRING
           valueFrom:
             secretKeyRef:

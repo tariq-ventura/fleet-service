@@ -14,7 +14,7 @@ func (eh *EquipmentHanlder) ListEquipmentsFleets(c *gin.Context) {
 		return
 	}
 
-	span, _ := eh.trace.StartSpan(
+	span, spanCtx := eh.trace.StartSpan(
 		ctx,
 		"equipments.create_equipment",
 		map[string]any{
@@ -25,20 +25,20 @@ func (eh *EquipmentHanlder) ListEquipmentsFleets(c *gin.Context) {
 	)
 	defer span.End()
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.database.connection", map[string]any{
+	dbSpan, dbCtx := eh.trace.StartSpan(spanCtx, "equipments.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
 		"db.name":           "fleets",
 		"db.operation":      "list",
 		"db.params.fleetID": fleetID,
 	})
 	defer operationSpan.End()
 
-	equipments, fleet, erro := database.ListEquipmentsFleets(fleetID)
+	equipments, fleet, erro := database.ListEquipmentsFleets(fleetID, opCtx)
 
 	if erro != nil {
 		c.JSON(erro.StatusCode, gin.H{

@@ -1,6 +1,7 @@
 package fleets_db_postgres
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -10,8 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func (pc *PostgresClient) UpdateFleets(id uuid.UUID, updates map[string]any) (*fleets_domain.Fleet, *interfaces.Error) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) UpdateFleets(id uuid.UUID, updates map[string]any, ctx context.Context) (*fleets_domain.Fleet, *interfaces.Error) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "fleets",
 		"db.operation":  "update",
 		"db.type":       "postgresql",
@@ -19,7 +20,7 @@ func (pc *PostgresClient) UpdateFleets(id uuid.UUID, updates map[string]any) (*f
 	})
 	defer operationSpan.End()
 
-	result, err := pc.ListFleetsById(id)
+	result, err := pc.ListFleetsById(id, spanCtx)
 
 	if err != nil {
 		return nil, err

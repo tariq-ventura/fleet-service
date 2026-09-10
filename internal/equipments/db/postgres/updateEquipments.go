@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -10,8 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
-func (pc *PostgresClient) UpdateEquipments(id uuid.UUID, updates map[string]any) (*equipments_domain.Equipment, *interfaces.Error) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) UpdateEquipments(id uuid.UUID, updates map[string]any, ctx context.Context) (*equipments_domain.Equipment, *interfaces.Error) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "equipments",
 		"db.operation":  "update",
 		"db.type":       "postgresql",
@@ -19,7 +20,7 @@ func (pc *PostgresClient) UpdateEquipments(id uuid.UUID, updates map[string]any)
 	})
 	defer operationSpan.End()
 
-	result, err := pc.ListEquipmentsById(id)
+	result, err := pc.ListEquipmentsById(id, spanCtx)
 
 	if err != nil {
 		return nil, err

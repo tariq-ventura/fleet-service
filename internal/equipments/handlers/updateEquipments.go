@@ -21,13 +21,29 @@ func (eh *EquipmentHanlder) UpdateEquipments(c *gin.Context) {
 		return
 	}
 
+	span, spanCtx := eh.trace.StartSpan(
+		ctx,
+		"equipments.create_equipment",
+		map[string]any{
+			"http.method":    "PATCH",
+			"http.route":     "/api/v1/equipments/${id}",
+			"http.params.id": id,
+		},
+	)
+	defer span.End()
+
 	var request equipments_dto.UpdateEquipmentRequest
 
-	if err := c.ShouldBindJSON(&request); err != nil {
+	bindSpan, bindCtx := eh.trace.StartSpan(spanCtx, "equipments.create_equipment.BindJson", nil)
+	bindError := c.ShouldBindJSON(&request)
+	bindSpan.End()
+
+	if bindError != nil {
+		eh.logs.LogWarning("invalid request", map[string]interface{}{"error": err.Error()})
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid_request",
 			"message": "Los datos enviados no son válidos",
-			"detail":  err.Error(),
+			"detail":  bindError.Error(),
 		})
 		return
 	}
@@ -99,19 +115,19 @@ func (eh *EquipmentHanlder) UpdateEquipments(c *gin.Context) {
 		return
 	}
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.database.connection", map[string]any{
+	dbSpan, dbCtx := eh.trace.StartSpan(bindCtx, "equipments.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
+	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
 		"db.name":      "equipments",
 		"db.operation": "update",
 	})
 	defer operationSpan.End()
 
-	result, erro := database.UpdateEquipments(id, updates)
+	result, erro := database.UpdateEquipments(id, updates, opCtx)
 
 	if erro != nil {
 		c.JSON(erro.StatusCode, gin.H{

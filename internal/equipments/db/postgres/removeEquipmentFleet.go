@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"errors"
 
 	"github.com/google/uuid"
@@ -11,8 +12,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func (pc *PostgresClient) RemoveEquipmentFleet(fleetId, equipmentId uuid.UUID) *interfaces.Error {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) RemoveEquipmentFleet(fleetId, equipmentId uuid.UUID, ctx context.Context) *interfaces.Error {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "equipments",
 		"db.operation":  "update",
 		"db.type":       "postgresql",

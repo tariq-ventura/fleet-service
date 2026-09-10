@@ -18,19 +18,30 @@ func (eh *EquipmentHanlder) ListEquipmentStatusHistory(c *gin.Context) {
 		return
 	}
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.database.connection", map[string]any{
+	span, spanCtx := eh.trace.StartSpan(
+		ctx,
+		"equipments.create_equipment",
+		map[string]any{
+			"http.method":    "GET",
+			"http.route":     "/api/v1/equipments/${id}/status",
+			"http.params.id": equipmentID,
+		},
+	)
+	defer span.End()
+
+	dbSpan, dbCtx := eh.trace.StartSpan(spanCtx, "equipments.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
+	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
 		"db.name":      "equipments",
 		"db.operation": "list",
 	})
 	defer operationSpan.End()
 
-	history, dberr := database.ListEquipmentStatusHistory(equipmentID)
+	history, dberr := database.ListEquipmentStatusHistory(equipmentID, opCtx)
 
 	if dberr != nil {
 		c.JSON(dberr.StatusCode, gin.H{

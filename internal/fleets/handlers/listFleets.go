@@ -12,7 +12,7 @@ func (fh *FleetHanlder) ListFleets(c *gin.Context) {
 	ctx := c.Request.Context()
 	search := strings.TrimSpace(c.Query("search"))
 
-	span, _ := fh.trace.StartSpan(
+	span, spanCtx := fh.trace.StartSpan(
 		ctx,
 		"equipments.create_equipment",
 		map[string]any{
@@ -26,19 +26,19 @@ func (fh *FleetHanlder) ListFleets(c *gin.Context) {
 	page := validations.ParsePositiveInt(c.DefaultQuery("page", "1"), 1)
 	pageSize := validations.ParsePositiveInt(c.DefaultQuery("pageSize", "20"), 20)
 
-	dbSpan, dbCtx := fh.trace.StartSpan(ctx, "fleets.database.connection", map[string]any{
+	dbSpan, dbCtx := fh.trace.StartSpan(spanCtx, "fleets.database.connection", map[string]any{
 		"db.name": "fleets",
 	})
 	database := fh.db
 	dbSpan.End()
 
-	operationSpan, _ := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+	operationSpan, opCtx := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
 		"db.name":      "fleets",
 		"db.operation": "list",
 	})
 	defer operationSpan.End()
 
-	result, err, total := database.ListFleets(page, pageSize, search)
+	result, err, total := database.ListFleets(page, pageSize, search, opCtx)
 
 	if err != nil {
 		c.JSON(err.StatusCode, gin.H{

@@ -1,6 +1,7 @@
 package equipments_db_postgres
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,8 +26,8 @@ var (
 	)
 )
 
-func (pc *PostgresClient) UpdateEquipmentStatus(equipmentId uuid.UUID, newStatus equipments_domain.EquipmentStatus) (*equipments_domain.EquipmentStatusHistory, *equipments_domain.Equipment, *interfaces.Error) {
-	operationSpan, spanCtx := pc.trace.StartSpan(pc.ctx, "equipments.database.postgres", map[string]any{
+func (pc *PostgresClient) UpdateEquipmentStatus(equipmentId uuid.UUID, newStatus equipments_domain.EquipmentStatus, ctx context.Context) (*equipments_domain.EquipmentStatusHistory, *equipments_domain.Equipment, *interfaces.Error) {
+	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
 		"db.name":       "equipments",
 		"db.operation":  "update",
 		"db.type":       "postgresql",

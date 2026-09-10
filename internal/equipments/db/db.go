@@ -15,15 +15,15 @@ import (
 )
 
 type IEquipmentsDB interface {
-	AssignEquipmentFleet(fleetId, equipmentId uuid.UUID) (*equipments_domain.Equipment, *interfaces.Error)
+	AssignEquipmentFleet(fleetId, equipmentId uuid.UUID, ctx context.Context) (*equipments_domain.Equipment, *interfaces.Error)
 	CreateEquipment(data equipments_domain.Equipment, ctx context.Context) *interfaces.Error
-	ListEquipments(page, pageSize int, etype, status, brand, search string) ([]equipments_domain.Equipment, *interfaces.Error, int64)
-	ListEquipmentsById(id uuid.UUID) (*equipments_domain.Equipment, *interfaces.Error)
-	ListEquipmentStatusHistory(id uuid.UUID) ([]equipments_domain.EquipmentStatusHistory, *interfaces.Error)
-	ListEquipmentsFleets(fleeId uuid.UUID) ([]equipments_domain.Equipment, *fleets_domain.Fleet, *interfaces.Error)
-	RemoveEquipmentFleet(fleetId, equipmentId uuid.UUID) *interfaces.Error
-	UpdateEquipments(id uuid.UUID, updates map[string]any) (*equipments_domain.Equipment, *interfaces.Error)
-	UpdateEquipmentStatus(equipmentId uuid.UUID, newStatus equipments_domain.EquipmentStatus) (*equipments_domain.EquipmentStatusHistory, *equipments_domain.Equipment, *interfaces.Error)
+	ListEquipments(page, pageSize int, etype, status, brand, search string, ctx context.Context) ([]equipments_domain.Equipment, *interfaces.Error, int64)
+	ListEquipmentsById(id uuid.UUID, ctx context.Context) (*equipments_domain.Equipment, *interfaces.Error)
+	ListEquipmentStatusHistory(id uuid.UUID, ctx context.Context) ([]equipments_domain.EquipmentStatusHistory, *interfaces.Error)
+	ListEquipmentsFleets(fleeId uuid.UUID, ctx context.Context) ([]equipments_domain.Equipment, *fleets_domain.Fleet, *interfaces.Error)
+	RemoveEquipmentFleet(fleetId, equipmentId uuid.UUID, ctx context.Context) *interfaces.Error
+	UpdateEquipments(id uuid.UUID, updates map[string]any, ctx context.Context) (*equipments_domain.Equipment, *interfaces.Error)
+	UpdateEquipmentStatus(equipmentId uuid.UUID, newStatus equipments_domain.EquipmentStatus, ctx context.Context) (*equipments_domain.EquipmentStatusHistory, *equipments_domain.Equipment, *interfaces.Error)
 }
 
 var NewDatabase = func(ctx context.Context, l logging.ILogging, t interfaces.ITrace, client *gorm.DB) (IEquipmentsDB, error) {

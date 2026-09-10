@@ -14,7 +14,7 @@ func (fh *FleetHanlder) ListFleetsById(c *gin.Context) {
 		return
 	}
 
-	span, _ := fh.trace.StartSpan(
+	span, spanCtx := fh.trace.StartSpan(
 		ctx,
 		"equipments.create_equipment",
 		map[string]any{
@@ -25,20 +25,20 @@ func (fh *FleetHanlder) ListFleetsById(c *gin.Context) {
 	)
 	defer span.End()
 
-	dbSpan, dbCtx := fh.trace.StartSpan(ctx, "fleets.database.connection", map[string]any{
+	dbSpan, dbCtx := fh.trace.StartSpan(spanCtx, "fleets.database.connection", map[string]any{
 		"db.name": "fleets",
 	})
 	database := fh.db
 	dbSpan.End()
 
-	operationSpan, _ := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
+	operationSpan, opCtx := fh.trace.StartSpan(dbCtx, "fleets.database.operations", map[string]any{
 		"db.name":      "fleets",
 		"db.operation": "list",
 		"db.params.id": id,
 	})
 	defer operationSpan.End()
 
-	result, erro := database.ListFleetsById(id)
+	result, erro := database.ListFleetsById(id, opCtx)
 
 	if erro != nil {
 		c.JSON(erro.StatusCode, gin.H{

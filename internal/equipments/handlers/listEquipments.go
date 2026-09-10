@@ -15,7 +15,7 @@ func (eh *EquipmentHanlder) ListEquipments(c *gin.Context) {
 	brand := c.Query("brand")
 	search := strings.TrimSpace(c.Query("search"))
 
-	span, _ := eh.trace.StartSpan(
+	span, spanCtx := eh.trace.StartSpan(
 		ctx,
 		"equipments.list_equipments",
 		map[string]any{
@@ -32,19 +32,19 @@ func (eh *EquipmentHanlder) ListEquipments(c *gin.Context) {
 	page := validations.ParsePositiveInt(c.DefaultQuery("page", "1"), 1)
 	pageSize := validations.ParsePositiveInt(c.DefaultQuery("pageSize", "20"), 20)
 
-	dbSpan, dbCtx := eh.trace.StartSpan(ctx, "equipments.database.connection", map[string]any{
+	dbSpan, dbCtx := eh.trace.StartSpan(spanCtx, "equipments.database.connection", map[string]any{
 		"db.name": "equipments",
 	})
 	database := eh.db
 	dbSpan.End()
 
-	operationSpan, _ := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
+	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
 		"db.name":      "equipments",
 		"db.operation": "list",
 	})
 	defer operationSpan.End()
 
-	result, err, total := database.ListEquipments(page, pageSize, equipmentType, status, brand, search)
+	result, err, total := database.ListEquipments(page, pageSize, equipmentType, status, brand, search, opCtx)
 
 	if err != nil {
 		c.JSON(err.StatusCode, gin.H{

@@ -52,6 +52,7 @@ steps:
       - -c 
       - | 
           gcloud deploy apply --file cdeploy/${_CDEPLOY_DEV_TARGET} --region=${_REGION}
+          gcloud deploy apply --file cdeploy/${_CDEPLOY_PROD_TARGET} --region=${_REGION}
 
           echo "Applying Cloud Deploy pipeline definition from clouddeploy.yaml..."
           gcloud deploy apply --file=cdeploy/clouddeploy.yaml \
@@ -63,7 +64,7 @@ steps:
             --project="${_PROJECT_ID}" \
             --region="${_REGION}" \
             --delivery-pipeline="${_DELIVERY_PIPELINE}" \
-            --images="container-image-dev=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}" \
+            --images="container-image-dev=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_DEV_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA},container-image-prod=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}" \
             --source="./" \
             --annotations="commitId=${REVISION_ID}" \
             --skaffold-file="cdeploy/skaffold.yaml" \

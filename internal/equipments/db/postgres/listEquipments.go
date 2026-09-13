@@ -9,84 +9,41 @@ import (
 	"github.com/tariq-ventura/fleet-service/internal/interfaces"
 )
 
-func (pc *PostgresClient) ListEquipments(page, pageSize int, etype, status, brand, search string, ctx context.Context) ([]equipments_domain.Equipment, *interfaces.Error, int64) {
-	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
-		"db.name":           "equipments",
-		"db.operation":      "list",
-		"db.type":           "postgresql",
-		"equipments.type":   etype,
-		"equipments.status": status,
-		"equipments.brand":  brand,
-		"request.page":      page,
-		"rquest.pageSize":   pageSize,
-	})
-	defer operationSpan.End()
-
+func (pc *PostgresClient) ListEquipments(page, pageSize int, equipmentType, status, brand, search string, ctx context.Context) ([]equipments_domain.Equipment, *interfaces.Error, int64) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
 
-	query := pc.client.WithContext(spanCtx).Model(&equipments_domain.Equipment{})
-
-	if etype != "" {
-		query = query.Where(
-			"type = ?",
-			strings.ToUpper(strings.TrimSpace(etype)),
-		)
+	query := pc.client.WithContext(ctx).Model(&equipments_domain.Equipment{})
+	if equipmentType != "" {
+		query = query.Where("LOWER(type) = ?", strings.ToLower(strings.TrimSpace(equipmentType)))
 	}
-
 	if status != "" {
-		query = query.Where(
-			"status = ?",
-			strings.ToUpper(strings.TrimSpace(status)),
-		)
+		query = query.Where("LOWER(status) = ?", strings.ToLower(strings.TrimSpace(status)))
 	}
-
 	if brand != "" {
-		query = query.Where(
-			"brand = ?",
-			strings.ToUpper(strings.TrimSpace(brand)),
-		)
+		query = query.Where("LOWER(brand) = ?", strings.ToLower(strings.TrimSpace(brand)))
 	}
-
 	if search != "" {
-		pattern := "%" + search + "%"
-		query = query.Where(
-			`code ILIKE ? 
-			OR brand ILIKE ? 
-			OR model ILIKE ? 
-			OR serial_number ILIKE ?`,
-			pattern,
-			pattern,
-			pattern,
-			pattern,
-		)
+		pattern := "%" + strings.TrimSpace(search) + "%"
+		query = query.Where("description ILIKE ? OR type ILIKE ? OR brand ILIKE ? OR model ILIKE ? OR remote_id ILIKE ? OR tags ILIKE ?", pattern, pattern, pattern, pattern, pattern, pattern)
 	}
 
 	var total int64
-
 	if err := query.Count(&total).Error; err != nil {
-		pc.logging.LogError("database_error", map[string]any{"error": err.Error()})
-		return nil, &interfaces.Error{
-			Error:      "database_error",
-			Message:    "No se pudo contar la maquinaria",
-			StatusCode: http.StatusInternalServerError,
-		}, 0
+		return nil, databaseError("No se pudo contar los vehículos", err, pc), 0
 	}
 
-	var equipment []equipments_domain.Equipment
-	offset := (page - 1) * pageSize
-
-	result := query.Order("created_at DESC").Limit(pageSize).Offset(offset).Find(&equipment)
-
+	vehicles := make([]equipments_domain.Equipment, 0)
+	result := query.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&vehicles)
 	if result.Error != nil {
-		pc.logging.LogError("database_error", map[string]any{"error": result.Error.Error()})
-		return nil, &interfaces.Error{
-			Error:      "database_error",
-			Message:    "No se pudo contar la maquinaria",
-			StatusCode: http.StatusInternalServerError,
-		}, 0
+		return nil, databaseError("No se pudieron consultar los vehículos", result.Error, pc), 0
 	}
 
-	return equipment, nil, total
+	return vehicles, nil, total
+}
+
+func databaseError(message string, err error, pc *PostgresClient) *interfaces.Error {
+	pc.logging.LogError("database_error", map[string]any{"error": err.Error()})
+	return &interfaces.Error{Error: "database_error", Message: message, StatusCode: http.StatusInternalServerError}
 }

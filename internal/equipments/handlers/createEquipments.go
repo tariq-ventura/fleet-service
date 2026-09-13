@@ -5,106 +5,27 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	equipments_domain "github.com/tariq-ventura/fleet-service/internal/equipments/domain"
 	equipments_dto "github.com/tariq-ventura/fleet-service/internal/equipments/dto"
-	"github.com/tariq-ventura/fleet-service/internal/validations"
 )
 
 func (eh *EquipmentHanlder) CreateEquipment(c *gin.Context) {
-	ctx := c.Request.Context()
-	var request equipments_dto.CreateEquipmentRequest
-
-	span, spanCtx := eh.trace.StartSpan(
-		ctx,
-		"equipments.create_equipment",
-		map[string]any{
-			"http.method": "POST",
-			"http.route":  "/api/v1/equipments",
-		},
-	)
-	defer span.End()
-
-	bindSpan, bindCtx := eh.trace.StartSpan(spanCtx, "equipments.create_equipment.BindJson", nil)
-	err := c.ShouldBindJSON(&request)
-	bindSpan.End()
-
-	if err != nil {
-		eh.logs.LogWarning("invalid request", map[string]interface{}{"error": err.Error()})
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_request",
-			"message": "Los datos enviados no son válidos",
-			"detail":  err.Error(),
-		})
+	var input equipments_dto.CreateEquipmentRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "message": "Los datos enviados no son válidos", "detail": err.Error()})
 		return
 	}
 
-	fleetSpan, validationCtx := eh.trace.StartSpan(bindCtx, "equipments.create_equipment.validate_fleetID", nil)
-	fleetId := validations.ValidateFleetId(request.FleetID)
-	fleetSpan.End()
-
-	if fleetSpan == nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_fleet_id",
-			"message": "fleetId debe ser un UUID válido",
-		})
+	vehicle := &equipments_domain.Equipment{
+		Description: strings.TrimSpace(input.Description), Status: strings.TrimSpace(input.Status),
+		Type: strings.TrimSpace(input.Type), Year: input.Year, Color: strings.TrimSpace(input.Color),
+		Brand: strings.TrimSpace(input.Brand), Model: strings.TrimSpace(input.Model), Group: strings.TrimSpace(input.Group),
+		Tags: strings.TrimSpace(input.Tags), Driver: strings.TrimSpace(input.Driver), RemoteID: strings.TrimSpace(input.RemoteID),
+	}
+	if responseError := eh.db.CreateEquipment(vehicle, c.Request.Context()); responseError != nil {
+		c.JSON(responseError.StatusCode, gin.H{"error": responseError.Error, "message": responseError.Message})
 		return
 	}
 
-	equipment := equipments_domain.Equipment{
-		ID:           uuid.New(),
-		Code:         strings.ToUpper(strings.TrimSpace(request.Code)),
-		FleetID:      fleetId,
-		Type:         equipments_domain.EquipmentType(request.Type),
-		Brand:        strings.TrimSpace(request.Brand),
-		Model:        strings.TrimSpace(request.Model),
-		SerialNumber: strings.ToUpper(strings.TrimSpace(request.SerialNumber)),
-		Year:         request.Year,
-
-		CapacityTons: request.CapacityTons,
-		Status:       equipments_domain.StatusAvailable,
-
-		Location: equipments_domain.Location{
-			Name:      strings.TrimSpace(request.Location.Name),
-			Latitude:  request.Location.Latitude,
-			Longitude: request.Location.Longitude,
-		},
-
-		EngineHours: request.EngineHours,
-
-		NextMaintenanceHours: request.EngineHours +
-			request.MaintenanceInterval,
-
-		FuelPercent: request.FuelPercent,
-	}
-
-	dbSpan, dbCtx := eh.trace.StartSpan(validationCtx, "equipments.create_equipment.database.connection", map[string]any{
-		"db.name": "equipments",
-	})
-	database := eh.db
-	dbSpan.End()
-
-	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.create_equipment.database.operations", map[string]any{
-		"db.name":              "equipments",
-		"db.operation":         "insert",
-		"equipments.code":      equipment.Code,
-		"equipments.fleet":     equipment.FleetID,
-		"equipments.createdAt": equipment.CreatedAt,
-	})
-	defer operationSpan.End()
-
-	result := database.CreateEquipment(equipment, opCtx)
-
-	if result != nil {
-		c.JSON(result.StatusCode, gin.H{
-			"error":   result.Error,
-			"message": result.Message,
-		})
-		return
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Maquinaria registrada correctamente",
-		"data":    equipment,
-	})
+	c.JSON(http.StatusCreated, gin.H{"message": "Vehículo registrado correctamente", "data": vehicle})
 }

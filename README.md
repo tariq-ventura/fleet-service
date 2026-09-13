@@ -1,6 +1,8 @@
 # Fleet Service
 
-Microservicio REST para la gestión de **maquinaria pesada y flotas**. Permite registrar maquinaria, consultar y actualizar sus datos, controlar su ciclo de estados, mantener un historial de cambios y asignar o retirar maquinaria de una flota.
+Microservicio REST que expone la información de **flota, tareas, mantenimientos y geocercas** del proveedor de rastreo **Startrack** dentro de la plataforma Entropy.
+
+Permite registrar vehículos y maquinaria, consultarlos con filtros y paginación, cambiar su estado operativo dejando historial, registrar órdenes de mantenimiento, programar tareas de traslado y administrar geocercas.
 
 El servicio está desarrollado en **Go**, expone una API HTTP con **Gin**, utiliza **PostgreSQL** mediante **GORM** y cuenta con instrumentación de observabilidad basada en **OpenTelemetry**.
 
@@ -15,12 +17,15 @@ El servicio está desarrollado en **Go**, expone una API HTTP con **Gin**, utili
 - [Variables de entorno](#variables-de-entorno)
 - [Levantar el proyecto localmente](#levantar-el-proyecto-localmente)
 - [Health check](#health-check)
-- [Modelo de maquinaria](#modelo-de-maquinaria)
-- [Tipos de maquinaria](#tipos-de-maquinaria)
-- [Estados de maquinaria](#estados-de-maquinaria)
-- [Transiciones de estado](#transiciones-de-estado)
+- [Modelos de datos](#modelos-de-datos)
 - [Endpoints](#endpoints)
+- [API de vehículos](#api-de-vehículos)
+- [API de tareas](#api-de-tareas)
+- [API de mantenimientos](#api-de-mantenimientos)
+- [API de geocercas](#api-de-geocercas)
+- [API de flotas](#api-de-flotas)
 - [Casos de uso](#casos-de-uso)
+- [Carga de datos sintéticos](#carga-de-datos-sintéticos)
 - [Pruebas end-to-end](#pruebas-end-to-end)
 - [Manejo de errores](#manejo-de-errores)
 - [Observabilidad](#observabilidad)
@@ -32,23 +37,23 @@ El servicio está desarrollado en **Go**, expone una API HTTP con **Gin**, utili
 
 El microservicio actualmente permite:
 
-- Crear y consultar flotas.
-- Actualizar información básica de una flota.
-- Registrar maquinaria pesada.
-- Consultar maquinaria con paginación y filtros.
-- Consultar una maquinaria por UUID.
-- Actualizar datos maestros de maquinaria.
-- Administrar el estado operativo de la maquinaria.
-- Validar las transiciones permitidas entre estados.
-- Mantener un historial de cambios de estado.
-- Asignar maquinaria a una flota.
-- Retirar maquinaria de una flota.
-- Consultar toda la maquinaria perteneciente a una flota.
-- Evitar que una maquinaria sea movida de flota cuando se encuentra en operación.
+- Registrar vehículos y maquinaria con la nomenclatura de Startrack.
+- Consultar vehículos con paginación y filtros por tipo, estado, marca y búsqueda libre.
+- Consultar un vehículo por UUID.
+- Actualizar datos maestros de un vehículo.
+- Cambiar el estado operativo de un vehículo y dejar registro en el historial.
+- Consultar el historial de cambios de estado.
+- Eliminar vehículos mediante borrado lógico.
+- Registrar, consultar, actualizar y eliminar órdenes de mantenimiento.
+- Registrar, consultar, actualizar y eliminar tareas de traslado.
+- Registrar, consultar, actualizar y eliminar geocercas.
+- Crear, listar, consultar y actualizar flotas como agrupación lógica.
 - Persistir la información en PostgreSQL.
 - Ejecutar migraciones automáticamente al iniciar el servicio.
 - Emitir trazas mediante OpenTelemetry a `STDOUT`, OTLP o Google Cloud.
 - Generar logs locales o mediante Google Cloud Logging.
+
+> El agrupamiento operativo de un vehículo se almacena directamente en su campo `group`, tal como lo entrega Startrack. Las flotas se mantienen como recurso de compatibilidad y ya **no** administran la pertenencia de vehículos.
 
 ---
 
@@ -63,6 +68,7 @@ El microservicio actualmente permite:
 | Google UUID | Identificadores UUID |
 | OpenTelemetry | Trazas distribuidas |
 | OTLP/gRPC | Exportación de trazas |
+| Logrus | Logging local estructurado |
 | Google Cloud Logging | Logging opcional en GCP |
 | Google Cloud Error Reporting | Reporte de errores en GCP |
 | Docker | Construcción del contenedor |
@@ -75,10 +81,12 @@ Dependencias principales definidas en `go.mod`:
 github.com/gin-gonic/gin
 github.com/gin-contrib/cors
 github.com/google/uuid
+github.com/sirupsen/logrus
 gorm.io/gorm
 gorm.io/driver/postgres
 go.opentelemetry.io/otel
 go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
+go.opentelemetry.io/otel/exporters/stdout/stdouttrace
 cloud.google.com/go/logging
 cloud.google.com/go/errorreporting
 ```
@@ -95,12 +103,27 @@ fleet-service/
 ├── internal/
 │   ├── database/
 │   │   └── postgres/
-│   ├── equipments/
+│   ├── equipments/          # vehículos Startrack
 │   │   ├── db/
 │   │   ├── domain/
 │   │   ├── dto/
 │   │   └── handlers/
-│   ├── fleets/
+│   ├── fleets/              # flotas (compatibilidad)
+│   │   ├── db/
+│   │   ├── domain/
+│   │   ├── dto/
+│   │   └── handlers/
+│   ├── geofences/
+│   │   ├── db/
+│   │   ├── domain/
+│   │   ├── dto/
+│   │   └── handlers/
+│   ├── maintenance/
+│   │   ├── db/
+│   │   ├── domain/
+│   │   ├── dto/
+│   │   └── handlers/
+│   ├── tasks/
 │   │   ├── db/
 │   │   ├── domain/
 │   │   ├── dto/
@@ -116,6 +139,15 @@ fleet-service/
 ├── fleet-service-test.sh
 ├── go.mod
 └── go.sum
+```
+
+Cada módulo de dominio sigue la misma estructura de cuatro capas:
+
+```text
+domain/    Modelo GORM y nombre de tabla
+dto/       Contratos de entrada y sus validaciones
+db/        Interfaz de persistencia + implementación PostgreSQL
+handlers/  Adaptadores HTTP de Gin
 ```
 
 ### Flujo general
@@ -142,6 +174,19 @@ PostgreSQL
 ```
 
 Las trazas y logs se generan de forma transversal durante las operaciones HTTP y de base de datos.
+
+### Tablas creadas
+
+| Módulo | Tabla |
+|---|---|
+| Vehículos | `startrack_vehicles` |
+| Historial de estados | `startrack_vehicle_status_history` |
+| Tareas | `startrack_tasks` |
+| Mantenimientos | `startrack_maintenance` |
+| Geocercas | `startrack_geofences` |
+| Flotas | `fleets` |
+
+Todas las tablas de dominio usan borrado lógico (`deleted_at`).
 
 ---
 
@@ -192,6 +237,7 @@ GCP_PROJECT_ID="gcp-project-id"
 | `DB_STRING` | Sí | DSN de conexión a PostgreSQL. | `host=postgres user=mongo password=1234 dbname=backend_golang_gin port=5432 sslmode=disable` |
 | `TRACE_TYPE` | Sí | Exportador de trazas. | `STDOUT` |
 | `SERVICE_NAME` | Sí | Nombre utilizado por OpenTelemetry. | `fleet-service` |
+| `PORT` | No | Puerto HTTP. Si no existe, usa `3000`. | `8080` |
 | `SERVICE_VERSION` | No | Versión del servicio para telemetría. | `0.1.0` |
 | `ENVIRONMENT` | No | Ambiente reportado en telemetría. | `local` |
 | `LOGGING_TYPE` | No | Tipo de logging. Si no existe, usa logging local. | `GCP` |
@@ -279,7 +325,7 @@ Para eliminar también el volumen local de PostgreSQL:
 docker compose down -v
 ```
 
-> Al iniciar, el servicio ejecuta `AutoMigrate` de GORM para crear o actualizar las tablas requeridas.
+> Al iniciar, el servicio ejecuta `AutoMigrate` de GORM para crear o actualizar las seis tablas requeridas.
 
 ### Opción 2: Go + PostgreSQL local
 
@@ -346,106 +392,157 @@ curl http://localhost:3000/health
 
 ---
 
-## Modelo de maquinaria
+## Modelos de datos
 
-Ejemplo de una maquinaria registrada:
+### Vehículo
+
+Tabla `startrack_vehicles`. Ejemplo de un vehículo registrado:
 
 ```json
 {
   "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-  "code": "CAT-320-001",
-  "type": "EXCAVATOR",
-  "brand": "CAT",
+  "description": "SYN-DEMO-01",
+  "status": "Normal",
+  "type": "Excavadora",
+  "year": 2024,
+  "color": "Amarillo",
+  "brand": "Caterpillar",
   "model": "320",
-  "serialNumber": "CAT320-0001",
-  "year": 2026,
-  "capacityTons": 22,
-  "status": "AVAILABLE",
-  "location": {
-    "name": "San Salvador",
-    "latitude": 13.6929,
-    "longitude": -89.2182
-  },
-  "engineHours": 120,
-  "nextMaintenanceHours": 370,
-  "fuelPercent": 85,
-  "createdAt": "2026-09-05T20:00:00Z",
-  "updatedAt": "2026-09-05T20:00:00Z"
+  "group": "Zona Central",
+  "tags": "excavacion,movimiento-tierra",
+  "driver": "Carlos Méndez",
+  "remoteId": "REMOTE-DEMO-01",
+  "location": "",
+  "latitude": 0,
+  "longitude": 0,
+  "createdAt": "2026-09-13T20:00:00Z",
+  "updatedAt": "2026-09-13T20:00:00Z"
 }
 ```
 
-Si la maquinaria pertenece a una flota también contiene:
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | UUID | Generado por el servicio |
+| `description` | string | Identificador legible del activo. **Único** |
+| `status` | string | Estado operativo. Texto libre, sin catálogo fijo |
+| `type` | string | Tipo de maquinaria. Texto libre |
+| `year` | int | Entre 1900 y 2100 |
+| `color` | string | Opcional |
+| `brand` | string | Opcional |
+| `model` | string | Opcional |
+| `group` | string | Agrupación operativa de Startrack |
+| `tags` | string | Etiquetas separadas por coma |
+| `driver` | string | Operador asignado |
+| `remoteId` | string | Identificador en el sistema remoto. **Único** |
+| `location` | string | Ubicación textual. Ver [Notas conocidas](#notas-conocidas) |
+| `latitude` | float | Grados decimales. Ver [Notas conocidas](#notas-conocidas) |
+| `longitude` | float | Grados decimales. Ver [Notas conocidas](#notas-conocidas) |
+| `lastPositionAt` | fecha | Se omite cuando es nulo |
+
+> `status` y `type` son cadenas libres. El servicio ya **no** valida un catálogo de tipos ni una máquina de estados: acepta los valores que envía el origen (`Normal`, `Alerta`, `Mantenimiento`, `Inactivo`, `Disponible`, etc.).
+
+### Historial de estado
+
+Tabla `startrack_vehicle_status_history`:
 
 ```json
 {
-  "fleetId": "9708aeb7-ad5b-4eac-81af-e19096991e89"
+  "id": "bb91f38f-75a4-4b42-88ce-5d097922a1d3",
+  "equipmentId": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
+  "fromStatus": "Normal",
+  "toStatus": "Mantenimiento",
+  "reason": "Ingreso a taller",
+  "changedAt": "2026-09-13T21:00:00Z"
 }
 ```
 
-`nextMaintenanceHours` se calcula al crear la maquinaria como:
+### Tarea
 
-```text
-engineHours + maintenanceIntervalHours
+Tabla `startrack_tasks`:
+
+```json
+{
+  "id": "3f0ad7a2-9c21-4a60-9d3f-1b2c3d4e5f60",
+  "taskId": "SYN-DEMO-TASK-ACT01",
+  "title": "Traslado de excavadora a San Miguel",
+  "description": "Tarea de traslado entre planteles.",
+  "type": "Traslado",
+  "status": "Pendiente",
+  "scheduledDate": "2030-07-15T08:00:00Z",
+  "origin": "Plantel central ECON",
+  "destination": "Parque industrial San Miguel",
+  "latitude": 134833000,
+  "longitude": -881833000,
+  "assignee": "Adriana Steiner",
+  "createdAt": "2026-09-13T20:00:00Z",
+  "updatedAt": "2026-09-13T20:00:00Z"
+}
 ```
 
----
+> `latitude` y `longitude` son **enteros**, no grados decimales. La carga sintética usa grados × 10⁷ (`13.4833` → `134833000`). El servicio almacena el entero tal cual, sin convertirlo.
 
-## Tipos de maquinaria
+### Mantenimiento
 
-Los tipos aceptados son:
+Tabla `startrack_maintenance`:
 
-| Valor | Descripción |
-|---|---|
-| `EXCAVATOR` | Excavadora |
-| `BACKHOE` | Retroexcavadora |
-| `BULLDOZER` | Bulldozer |
-| `LOADER` | Cargador |
-| `CRANE` | Grúa |
-| `TRUCK` | Camión |
-
----
-
-## Estados de maquinaria
-
-| Estado | Significado general |
-|---|---|
-| `AVAILABLE` | Disponible para asignación u operación |
-| `RESERVED` | Reservada para un trabajo |
-| `IN_TRANSIT` | En traslado |
-| `WORKING` | En operación |
-| `MAINTENANCE` | En mantenimiento |
-| `INACTIVE` | Inactiva |
-| `RETIRED` | Retirada definitivamente |
-
----
-
-## Transiciones de estado
-
-El dominio valida las transiciones de estado. No cualquier estado puede cambiar directamente a otro.
-
-| Estado actual | Estados siguientes permitidos |
-|---|---|
-| `AVAILABLE` | `RESERVED`, `MAINTENANCE`, `INACTIVE` |
-| `RESERVED` | `AVAILABLE`, `IN_TRANSIT`, `WORKING`, `MAINTENANCE` |
-| `IN_TRANSIT` | `AVAILABLE`, `WORKING`, `MAINTENANCE` |
-| `WORKING` | `AVAILABLE`, `MAINTENANCE` |
-| `MAINTENANCE` | `AVAILABLE`, `INACTIVE` |
-| `INACTIVE` | `AVAILABLE`, `RETIRED` |
-| `RETIRED` | Ninguno |
-
-Ejemplo de transición válida:
-
-```text
-AVAILABLE → RESERVED → IN_TRANSIT → WORKING → AVAILABLE
+```json
+{
+  "id": "9d1e6c34-7a42-4c8b-9f10-5b6a7c8d9e01",
+  "vehicle": "SYN-DEMO-01",
+  "reference": "Orden SYN-DEMO-01: Preventivo",
+  "serviceDate": "2026-08-14T00:00:00Z",
+  "odometer": 18200,
+  "serviceTime": "08:30",
+  "hourMeter": 850,
+  "repairReason": "Cambio de filtros y revisión general",
+  "provider": "Taller Central ECON",
+  "mechanic": "Equipo de mantenimiento",
+  "serviceType": "Preventivo",
+  "createdAt": "2026-09-13T20:00:00Z",
+  "updatedAt": "2026-09-13T20:00:00Z"
+}
 ```
 
-Ejemplo de transición inválida:
+> `vehicle` es la **descripción** del vehículo en texto, no su UUID. No existe llave foránea: el mantenimiento no valida que el vehículo exista.
 
-```text
-AVAILABLE → WORKING
+### Geocerca
+
+Tabla `startrack_geofences`:
+
+```json
+{
+  "id": "c4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70",
+  "geofenceId": "SYN-DEMO-GEO-SS",
+  "name": "Proyecto Centro San Salvador",
+  "group": "Proyectos centrales",
+  "additionalMargin": 250,
+  "latitude": 136929000,
+  "longitude": -892182000,
+  "createdAt": "2026-09-13T20:00:00Z",
+  "updatedAt": "2026-09-13T20:00:00Z"
+}
 ```
 
-La API responde `422 Unprocessable Entity` cuando la transición no es válida.
+> Igual que en tareas, `latitude` y `longitude` son enteros escalados.
+
+### Flota
+
+Tabla `fleets`:
+
+```json
+{
+  "id": "9708aeb7-ad5b-4eac-81af-e19096991e89",
+  "code": "FLEET-001",
+  "name": "Flota Central",
+  "description": "",
+  "branch": "",
+  "active": true,
+  "createdAt": "2026-09-13T20:00:00Z",
+  "updatedAt": "2026-09-13T20:00:00Z"
+}
+```
+
+> El modelo incluye `description`, `branch` y `active`, pero la API de creación y actualización solo recibe `code` y `name`.
 
 ---
 
@@ -453,16 +550,49 @@ La API responde `422 Unprocessable Entity` cuando la transición no es válida.
 
 ## Resumen
 
-### Maquinaria
+### Vehículos
+
+Disponibles bajo dos prefijos equivalentes: `/api/v1/vehicles` (nomenclatura Startrack, recomendado) y `/api/v1/equipments` (compatibilidad con el flujo n8n existente). Ambos apuntan a los mismos handlers.
 
 | Método | Endpoint | Descripción |
 |---|---|---|
-| `POST` | `/api/v1/equipments` | Registrar maquinaria |
-| `GET` | `/api/v1/equipments` | Listar y filtrar maquinaria |
-| `GET` | `/api/v1/equipments/:id` | Obtener maquinaria por UUID |
-| `PATCH` | `/api/v1/equipments/:id` | Actualizar datos de maquinaria |
-| `PATCH` | `/api/v1/equipments/:id/status` | Cambiar estado operativo |
-| `GET` | `/api/v1/equipments/:id/status-history` | Consultar historial de estados |
+| `POST` | `/api/v1/vehicles` | Registrar vehículo |
+| `GET` | `/api/v1/vehicles` | Listar y filtrar vehículos |
+| `GET` | `/api/v1/vehicles/:id` | Obtener vehículo por UUID |
+| `PATCH` | `/api/v1/vehicles/:id` | Actualizar datos del vehículo |
+| `DELETE` | `/api/v1/vehicles/:id` | Eliminar vehículo (borrado lógico) |
+| `PATCH` | `/api/v1/vehicles/:id/status` | Cambiar estado operativo |
+| `GET` | `/api/v1/vehicles/:id/status-history` | Consultar historial de estados |
+
+### Tareas
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/tasks` | Registrar tarea |
+| `GET` | `/api/v1/tasks` | Listar y filtrar tareas |
+| `GET` | `/api/v1/tasks/:id` | Obtener tarea por UUID |
+| `PATCH` | `/api/v1/tasks/:id` | Actualizar tarea |
+| `DELETE` | `/api/v1/tasks/:id` | Eliminar tarea |
+
+### Mantenimientos
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/maintenance` | Registrar mantenimiento |
+| `GET` | `/api/v1/maintenance` | Listar y filtrar mantenimientos |
+| `GET` | `/api/v1/maintenance/:id` | Obtener mantenimiento por UUID |
+| `PATCH` | `/api/v1/maintenance/:id` | Actualizar mantenimiento |
+| `DELETE` | `/api/v1/maintenance/:id` | Eliminar mantenimiento |
+
+### Geocercas
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/v1/geofences` | Registrar geocerca |
+| `GET` | `/api/v1/geofences` | Listar y buscar geocercas |
+| `GET` | `/api/v1/geofences/:id` | Obtener geocerca por UUID |
+| `PATCH` | `/api/v1/geofences/:id` | Actualizar geocerca |
+| `DELETE` | `/api/v1/geofences/:id` | Eliminar geocerca |
 
 ### Flotas
 
@@ -472,64 +602,52 @@ La API responde `422 Unprocessable Entity` cuando la transición no es válida.
 | `GET` | `/api/v1/fleets` | Listar flotas |
 | `GET` | `/api/v1/fleets/:fleetID` | Obtener flota por UUID |
 | `PATCH` | `/api/v1/fleets/:fleetID` | Actualizar flota |
-| `PUT` | `/api/v1/fleets/:fleetID/equipments/:equipmentID` | Asignar maquinaria |
-| `DELETE` | `/api/v1/fleets/:fleetID/equipments/:equipmentID` | Retirar maquinaria |
-| `GET` | `/api/v1/fleets/:fleetID/equipments` | Listar maquinaria de una flota |
+
+> Los endpoints de asignación y retiro de maquinaria de una flota (`PUT`/`DELETE /fleets/:fleetID/equipments/:equipmentID`) y el listado `GET /fleets/:fleetID/equipments` **ya no existen**. La agrupación se lee del campo `group` del vehículo.
 
 ---
 
-# API de maquinaria
+# API de vehículos
 
-## Crear maquinaria
+Los ejemplos usan `/api/v1/vehicles`; `/api/v1/equipments` acepta exactamente las mismas peticiones.
 
-### `POST /api/v1/equipments`
+## Crear vehículo
 
-Registra una nueva maquinaria. El estado inicial es automáticamente `AVAILABLE`.
+### `POST /api/v1/vehicles`
 
 ### Request
 
 ```json
 {
-  "code": "CAT-320-001",
-  "type": "EXCAVATOR",
-  "brand": "CAT",
+  "description": "SYN-DEMO-01",
+  "status": "Normal",
+  "type": "Excavadora",
+  "year": 2024,
+  "color": "Amarillo",
+  "brand": "Caterpillar",
   "model": "320",
-  "serialNumber": "CAT320-0001",
-  "year": 2026,
-  "capacityTons": 22,
-  "location": {
-    "name": "San Salvador",
-    "latitude": 13.6929,
-    "longitude": -89.2182
-  },
-  "engineHours": 120,
-  "maintenanceIntervalHours": 250,
-  "fuelPercent": 85
+  "group": "Zona Central",
+  "tags": "excavacion,movimiento-tierra",
+  "driver": "Carlos Méndez",
+  "remoteId": "REMOTE-DEMO-01"
 }
 ```
 
-También se puede crear directamente dentro de una flota utilizando:
+### Validaciones
 
-```json
-{
-  "fleetId": "9708aeb7-ad5b-4eac-81af-e19096991e89"
-}
-```
-
-### Validaciones relevantes
-
-- `code`: 3 a 50 caracteres.
-- `type`: uno de los tipos soportados.
-- `brand`: 2 a 100 caracteres.
-- `model`: 1 a 100 caracteres.
-- `serialNumber`: 3 a 100 caracteres.
-- `year`: entre 1950 y 2100.
-- `capacityTons`: mayor que 0.
-- `latitude`: entre -90 y 90.
-- `longitude`: entre -180 y 180.
-- `engineHours`: mayor o igual que 0.
-- `maintenanceIntervalHours`: mayor que 0.
-- `fuelPercent`: entre 0 y 100.
+| Campo | Obligatorio | Regla |
+|---|---:|---|
+| `description` | Sí | 2 a 200 caracteres. Único |
+| `status` | Sí | 2 a 50 caracteres |
+| `type` | Sí | 2 a 100 caracteres |
+| `year` | Sí | Entre 1900 y 2100 |
+| `remoteId` | Sí | Máximo 100 caracteres. Único |
+| `color` | No | Máximo 80 caracteres |
+| `brand` | No | Máximo 100 caracteres |
+| `model` | No | Máximo 100 caracteres |
+| `group` | No | Máximo 150 caracteres |
+| `tags` | No | Máximo 500 caracteres |
+| `driver` | No | Máximo 200 caracteres |
 
 ### Respuesta esperada
 
@@ -537,25 +655,25 @@ También se puede crear directamente dentro de una flota utilizando:
 
 ```json
 {
-  "message": "Maquinaria registrada correctamente",
+  "message": "Vehículo registrado correctamente",
   "data": {
     "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-    "code": "CAT-320-001",
-    "type": "EXCAVATOR",
-    "brand": "CAT",
+    "description": "SYN-DEMO-01",
+    "status": "Normal",
+    "type": "Excavadora",
+    "year": 2024,
+    "color": "Amarillo",
+    "brand": "Caterpillar",
     "model": "320",
-    "serialNumber": "CAT320-0001",
-    "year": 2026,
-    "capacityTons": 22,
-    "status": "AVAILABLE",
-    "location": {
-      "name": "San Salvador",
-      "latitude": 13.6929,
-      "longitude": -89.2182
-    },
-    "engineHours": 120,
-    "nextMaintenanceHours": 370,
-    "fuelPercent": 85
+    "group": "Zona Central",
+    "tags": "excavacion,movimiento-tierra",
+    "driver": "Carlos Méndez",
+    "remoteId": "REMOTE-DEMO-01",
+    "location": "",
+    "latitude": 0,
+    "longitude": 0,
+    "createdAt": "2026-09-13T20:00:00Z",
+    "updatedAt": "2026-09-13T20:00:00Z"
   }
 }
 ```
@@ -567,7 +685,8 @@ También se puede crear directamente dentro de una flota utilizando:
 ```json
 {
   "error": "invalid_request",
-  "message": "Los datos enviados no son válidos"
+  "message": "Los datos enviados no son válidos",
+  "detail": "Key: 'CreateEquipmentRequest.RemoteID' Error:Field validation for 'RemoteID' failed on the 'required' tag"
 }
 ```
 
@@ -575,18 +694,16 @@ También se puede crear directamente dentro de una flota utilizando:
 
 ```json
 {
-  "error": "equipment_already_exists",
-  "message": "Ya existe una maquinaria con ese código o número de serie"
+  "error": "vehicle_already_exists",
+  "message": "Ya existe un vehículo con esa descripción o ID remoto"
 }
 ```
 
 ---
 
-## Listar maquinaria
+## Listar vehículos
 
-### `GET /api/v1/equipments`
-
-Soporta filtros y paginación.
+### `GET /api/v1/vehicles`
 
 ### Query parameters
 
@@ -594,15 +711,15 @@ Soporta filtros y paginación.
 |---|---:|---|
 | `page` | No | Página. Default: `1` |
 | `pageSize` | No | Registros por página. Default: `20`; máximo efectivo: `100` |
-| `type` | No | Filtrar por tipo |
-| `status` | No | Filtrar por estado |
-| `brand` | No | Filtrar por marca |
-| `search` | No | Busca por código, marca, modelo o número de serie |
+| `type` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `status` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `brand` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `search` | No | Busca en `description`, `type`, `brand`, `model`, `remoteId` y `tags` |
 
 Ejemplo:
 
 ```bash
-curl "http://localhost:3000/api/v1/equipments?type=EXCAVATOR&status=AVAILABLE&search=CAT&page=1&pageSize=20"
+curl "http://localhost:3000/api/v1/vehicles?type=Excavadora&status=Normal&search=SYN-DEMO&page=1&pageSize=20"
 ```
 
 ### Respuesta esperada
@@ -614,11 +731,12 @@ curl "http://localhost:3000/api/v1/equipments?type=EXCAVATOR&status=AVAILABLE&se
   "data": [
     {
       "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-      "code": "CAT-320-001",
-      "type": "EXCAVATOR",
-      "brand": "CAT",
+      "description": "SYN-DEMO-01",
+      "status": "Normal",
+      "type": "Excavadora",
+      "brand": "Caterpillar",
       "model": "320",
-      "status": "AVAILABLE"
+      "group": "Zona Central"
     }
   ],
   "pagination": {
@@ -630,14 +748,16 @@ curl "http://localhost:3000/api/v1/equipments?type=EXCAVATOR&status=AVAILABLE&se
 }
 ```
 
+Los resultados se ordenan por `createdAt` descendente.
+
 ---
 
-## Consultar maquinaria por ID
+## Consultar vehículo por ID
 
-### `GET /api/v1/equipments/:id`
+### `GET /api/v1/vehicles/:id`
 
 ```bash
-curl http://localhost:3000/api/v1/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd5
+curl http://localhost:3000/api/v1/vehicles/68dd1b50-d732-4fe3-88e9-fb980e61bdd5
 ```
 
 **200 OK**
@@ -646,9 +766,9 @@ curl http://localhost:3000/api/v1/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd
 {
   "data": {
     "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-    "code": "CAT-320-001",
-    "type": "EXCAVATOR",
-    "status": "AVAILABLE"
+    "description": "SYN-DEMO-01",
+    "status": "Normal",
+    "type": "Excavadora"
   }
 }
 ```
@@ -671,11 +791,13 @@ curl http://localhost:3000/api/v1/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd
 }
 ```
 
+> Este endpoint conserva el código heredado `equipment_not_found`. Las demás operaciones devuelven `vehicle_not_found`. Ver [Notas conocidas](#notas-conocidas).
+
 ---
 
-## Actualizar maquinaria
+## Actualizar vehículo
 
-### `PATCH /api/v1/equipments/:id`
+### `PATCH /api/v1/vehicles/:id`
 
 Permite modificar parcialmente los datos maestros.
 
@@ -684,28 +806,24 @@ Permite modificar parcialmente los datos maestros.
 ```json
 {
   "brand": "Caterpillar",
-  "capacityTons": 23,
-  "location": {
-    "name": "San Miguel",
-    "latitude": 13.4833,
-    "longitude": -88.1833
-  }
+  "driver": "Ana López",
+  "group": "Zona Occidente"
 }
 ```
 
 Campos soportados:
 
 ```text
-fleetId
+description
 type
+year
+color
 brand
 model
-serialNumber
-year
-capacityTons
-location.name
-location.latitude
-location.longitude
+group
+tags
+driver
+remoteId
 ```
 
 ### Respuesta esperada
@@ -714,11 +832,12 @@ location.longitude
 
 ```json
 {
-  "message": "Maquinaria actualizada correctamente",
+  "message": "Vehículo actualizado correctamente",
   "data": {
     "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
     "brand": "Caterpillar",
-    "capacityTons": 23
+    "driver": "Ana López",
+    "group": "Zona Occidente"
   }
 }
 ```
@@ -730,26 +849,52 @@ Si no se envía ningún campo:
 ```json
 {
   "error": "empty_update",
-  "message": "Debe enviar al menos un campo para actualizar"
+  "message": "Debe enviar al menos un campo"
 }
 ```
 
 ---
 
-## Cambiar estado de maquinaria
+## Eliminar vehículo
 
-### `PATCH /api/v1/equipments/:id/status`
+### `DELETE /api/v1/vehicles/:id`
+
+```bash
+curl -i -X DELETE \
+  http://localhost:3000/api/v1/vehicles/68dd1b50-d732-4fe3-88e9-fb980e61bdd5
+```
+
+**204 No Content**, sin body. El borrado es lógico: el registro conserva su fila con `deleted_at` y deja de aparecer en las consultas.
+
+**404 Not Found**
+
+```json
+{
+  "error": "vehicle_not_found",
+  "message": "El vehículo no existe"
+}
+```
+
+---
+
+## Cambiar estado de un vehículo
+
+### `PATCH /api/v1/vehicles/:id/status`
+
+El cambio se ejecuta dentro de una transacción con bloqueo `FOR UPDATE` sobre el vehículo y registra una fila en el historial.
 
 ### Request
 
 ```json
 {
-  "status": "RESERVED",
-  "reason": "Reservada para una solicitud logística"
+  "status": "Mantenimiento",
+  "reason": "Ingreso a taller por falla hidráulica"
 }
 ```
 
-### Respuesta funcional esperada
+Ambos campos son obligatorios: `status` de 2 a 50 caracteres y `reason` de 2 a 250.
+
+### Respuesta esperada
 
 **200 OK**
 
@@ -757,41 +902,51 @@ Si no se envía ningún campo:
 {
   "message": "Estado actualizado correctamente",
   "data": {
-    "equipment": {
+    "vehicle": {
       "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-      "status": "RESERVED"
+      "description": "SYN-DEMO-01",
+      "status": "Mantenimiento"
     },
     "transition": {
+      "id": "bb91f38f-75a4-4b42-88ce-5d097922a1d3",
       "equipmentId": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-      "fromStatus": "AVAILABLE",
-      "toStatus": "RESERVED",
-      "reason": "Reservada para una solicitud logística"
+      "fromStatus": "Normal",
+      "toStatus": "Mantenimiento",
+      "reason": "Ingreso a taller por falla hidráulica",
+      "changedAt": "2026-09-13T21:00:00Z"
     }
   }
 }
 ```
 
-Una transición no permitida responde:
+No existe una máquina de estados: **cualquier valor de `status` es aceptado**. La única restricción es que el estado nuevo sea distinto del actual.
 
-**422 Unprocessable Entity**
+**409 Conflict** al enviar el mismo estado que ya tiene el vehículo:
 
 ```json
 {
-  "error": "invalid_status_transition",
-  "message": "invalid equipment status transition: AVAILABLE -> WORKING"
+  "error": "invalid_status_change",
+  "message": "vehicle already has the requested status"
 }
 ```
 
-> Revisar la sección [Notas conocidas](#notas-conocidas): la implementación actual del handler/DB presenta una inconsistencia en el mapeo de `equipment`, `transition` y `reason`.
+**404 Not Found**
+
+```json
+{
+  "error": "vehicle_not_found",
+  "message": "El vehículo no existe"
+}
+```
 
 ---
 
 ## Consultar historial de estados
 
-### `GET /api/v1/equipments/:id/status-history`
+### `GET /api/v1/vehicles/:id/status-history`
 
 ```bash
-curl http://localhost:3000/api/v1/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd5/status-history
+curl http://localhost:3000/api/v1/vehicles/68dd1b50-d732-4fe3-88e9-fb980e61bdd5/status-history
 ```
 
 **200 OK**
@@ -802,20 +957,320 @@ curl http://localhost:3000/api/v1/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd
     {
       "id": "bb91f38f-75a4-4b42-88ce-5d097922a1d3",
       "equipmentId": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-      "fromStatus": "WORKING",
-      "toStatus": "AVAILABLE",
-      "reason": "Trabajo finalizado",
-      "changedAt": "2026-09-05T21:00:00Z"
+      "fromStatus": "Normal",
+      "toStatus": "Mantenimiento",
+      "reason": "Ingreso a taller por falla hidráulica",
+      "changedAt": "2026-09-13T21:00:00Z"
     }
   ]
 }
 ```
 
-El historial se devuelve ordenado por `changedAt` descendente.
+El historial se devuelve ordenado por `changedAt` descendente. Si el vehículo no existe responde `404`.
+
+---
+
+# API de tareas
+
+## Crear tarea
+
+### `POST /api/v1/tasks`
+
+### Request
+
+```json
+{
+  "taskId": "SYN-DEMO-TASK-ACT01",
+  "title": "Traslado de excavadora a San Miguel",
+  "description": "Tarea de traslado entre planteles.",
+  "type": "Traslado",
+  "status": "Pendiente",
+  "scheduledDate": "2030-07-15T08:00:00Z",
+  "origin": "Plantel central ECON",
+  "destination": "Parque industrial San Miguel",
+  "latitude": 134833000,
+  "longitude": -881833000,
+  "assignee": "Adriana Steiner"
+}
+```
+
+### Validaciones
+
+| Campo | Obligatorio | Regla |
+|---|---:|---|
+| `taskId` | Sí | Máximo 100 caracteres. Único |
+| `title` | Sí | Máximo 200 caracteres |
+| `type` | Sí | Máximo 100 caracteres |
+| `status` | Sí | Máximo 100 caracteres |
+| `scheduledDate` | Sí | Fecha RFC 3339. Se almacena en UTC |
+| `origin` | Sí | Máximo 250 caracteres |
+| `destination` | Sí | Máximo 250 caracteres |
+| `latitude` | Sí | Entero. No admite `0` |
+| `longitude` | Sí | Entero. No admite `0` |
+| `assignee` | Sí | Máximo 200 caracteres |
+| `description` | No | Máximo 2000 caracteres |
+
+**201 Created**
+
+```json
+{
+  "message": "Tarea registrada correctamente",
+  "data": {
+    "id": "3f0ad7a2-9c21-4a60-9d3f-1b2c3d4e5f60",
+    "taskId": "SYN-DEMO-TASK-ACT01",
+    "status": "Pendiente"
+  }
+}
+```
+
+**409 Conflict** con `taskId` duplicado:
+
+```json
+{
+  "error": "task_already_exists",
+  "message": "Ya existe una tarea con ese identificador"
+}
+```
+
+---
+
+## Listar tareas
+
+### `GET /api/v1/tasks`
+
+| Parámetro | Obligatorio | Descripción |
+|---|---:|---|
+| `page` | No | Página. Default: `1` |
+| `pageSize` | No | Default: `20`; máximo efectivo: `100` |
+| `status` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `type` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `search` | No | Busca en `taskId`, `title`, `description`, `origin`, `destination` y `assignee` |
+
+```bash
+curl "http://localhost:3000/api/v1/tasks?status=Pendiente&search=SYN-DEMO"
+```
+
+Devuelve `data` + `pagination`, ordenado por `scheduledDate` descendente.
+
+---
+
+## Consultar, actualizar y eliminar tareas
+
+```text
+GET    /api/v1/tasks/:id
+PATCH  /api/v1/tasks/:id
+DELETE /api/v1/tasks/:id
+```
+
+`PATCH` acepta cualquier subconjunto de los campos de creación y responde:
+
+```json
+{
+  "message": "Tarea actualizada correctamente",
+  "data": { "id": "3f0ad7a2-9c21-4a60-9d3f-1b2c3d4e5f60", "status": "Completada" }
+}
+```
+
+`DELETE` responde **204 No Content**.
+
+**404 Not Found**
+
+```json
+{
+  "error": "task_not_found",
+  "message": "La tarea no existe"
+}
+```
+
+---
+
+# API de mantenimientos
+
+## Crear mantenimiento
+
+### `POST /api/v1/maintenance`
+
+### Request
+
+```json
+{
+  "vehicle": "SYN-DEMO-01",
+  "reference": "Orden SYN-DEMO-01: Preventivo",
+  "serviceDate": "2026-08-14T00:00:00Z",
+  "odometer": 18200,
+  "serviceTime": "08:30",
+  "hourMeter": 850,
+  "repairReason": "Cambio de filtros y revisión general",
+  "provider": "Taller Central ECON",
+  "mechanic": "Equipo de mantenimiento",
+  "serviceType": "Preventivo"
+}
+```
+
+### Validaciones
+
+| Campo | Obligatorio | Regla |
+|---|---:|---|
+| `vehicle` | Sí | Máximo 200 caracteres. Es la `description` del vehículo, no su UUID |
+| `reference` | Sí | Máximo 2000 caracteres |
+| `serviceDate` | Sí | Fecha RFC 3339. Se almacena en UTC |
+| `serviceTime` | Sí | Exactamente 5 caracteres, formato `HH:MM` |
+| `repairReason` | Sí | Máximo 200 caracteres |
+| `odometer` | No | Mayor o igual que 0 |
+| `hourMeter` | No | Mayor o igual que 0 |
+| `provider` | No | Máximo 200 caracteres |
+| `mechanic` | No | Máximo 200 caracteres |
+| `serviceType` | No | Máximo 200 caracteres |
+
+**201 Created**
+
+```json
+{
+  "message": "Mantenimiento registrado correctamente",
+  "data": {
+    "id": "9d1e6c34-7a42-4c8b-9f10-5b6a7c8d9e01",
+    "vehicle": "SYN-DEMO-01",
+    "serviceType": "Preventivo"
+  }
+}
+```
+
+No hay restricción de unicidad: pueden registrarse varias órdenes idénticas para el mismo vehículo.
+
+---
+
+## Listar mantenimientos
+
+### `GET /api/v1/maintenance`
+
+| Parámetro | Obligatorio | Descripción |
+|---|---:|---|
+| `page` | No | Página. Default: `1` |
+| `pageSize` | No | Default: `20`; máximo efectivo: `100` |
+| `vehicle` | No | Coincidencia exacta, sin distinguir mayúsculas |
+| `search` | No | Busca en `vehicle`, `reference`, `repairReason`, `provider`, `mechanic` y `serviceType` |
+
+```bash
+curl "http://localhost:3000/api/v1/maintenance?vehicle=SYN-DEMO-01"
+```
+
+Devuelve `data` + `pagination`, ordenado por `serviceDate` descendente.
+
+---
+
+## Consultar, actualizar y eliminar mantenimientos
+
+```text
+GET    /api/v1/maintenance/:id
+PATCH  /api/v1/maintenance/:id
+DELETE /api/v1/maintenance/:id
+```
+
+`DELETE` responde **204 No Content**.
+
+**404 Not Found**
+
+```json
+{
+  "error": "maintenance_not_found",
+  "message": "El mantenimiento no existe"
+}
+```
+
+---
+
+# API de geocercas
+
+## Crear geocerca
+
+### `POST /api/v1/geofences`
+
+### Request
+
+```json
+{
+  "geofenceId": "SYN-DEMO-GEO-SS",
+  "name": "Proyecto Centro San Salvador",
+  "group": "Proyectos centrales",
+  "additionalMargin": 250,
+  "latitude": 136929000,
+  "longitude": -892182000
+}
+```
+
+### Validaciones
+
+| Campo | Obligatorio | Regla |
+|---|---:|---|
+| `geofenceId` | Sí | Máximo 100 caracteres. Único |
+| `name` | Sí | Máximo 200 caracteres |
+| `latitude` | Sí | Entero. No admite `0` |
+| `longitude` | Sí | Entero. No admite `0` |
+| `group` | No | Máximo 150 caracteres |
+| `additionalMargin` | No | Mayor o igual que 0. Default `0` |
+
+**201 Created**
+
+```json
+{
+  "message": "Geocerca registrada correctamente",
+  "data": {
+    "id": "c4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f70",
+    "geofenceId": "SYN-DEMO-GEO-SS",
+    "name": "Proyecto Centro San Salvador"
+  }
+}
+```
+
+**409 Conflict**
+
+```json
+{
+  "error": "geofence_already_exists",
+  "message": "Ya existe una geocerca con ese identificador"
+}
+```
+
+---
+
+## Listar geocercas
+
+### `GET /api/v1/geofences`
+
+| Parámetro | Obligatorio | Descripción |
+|---|---:|---|
+| `page` | No | Página. Default: `1` |
+| `pageSize` | No | Default: `20`; máximo efectivo: `100` |
+| `search` | No | Busca en `geofenceId`, `name` y `group` |
+
+Devuelve `data` + `pagination`, ordenado por `createdAt` descendente.
+
+---
+
+## Consultar, actualizar y eliminar geocercas
+
+```text
+GET    /api/v1/geofences/:id
+PATCH  /api/v1/geofences/:id
+DELETE /api/v1/geofences/:id
+```
+
+`DELETE` responde **204 No Content**.
+
+**404 Not Found**
+
+```json
+{
+  "error": "geofence_not_found",
+  "message": "La geocerca no existe"
+}
+```
 
 ---
 
 # API de flotas
+
+Las flotas se conservan como agrupación lógica y como endpoint de compatibilidad. No administran la pertenencia de vehículos.
 
 ## Crear flota
 
@@ -832,11 +1287,8 @@ El historial se devuelve ordenado por `changedAt` descendente.
 
 Validaciones:
 
-- `code`: 3 a 50 caracteres.
+- `code`: 3 a 50 caracteres. Se normaliza a mayúsculas. Único.
 - `name`: 3 a 150 caracteres.
-- El código debe ser único.
-
-### Respuesta esperada
 
 **201 Created**
 
@@ -850,8 +1302,6 @@ Validaciones:
   }
 }
 ```
-
-Código duplicado:
 
 **409 Conflict**
 
@@ -868,15 +1318,11 @@ Código duplicado:
 
 ### `GET /api/v1/fleets`
 
-Query parameters:
-
 | Parámetro | Obligatorio | Descripción |
 |---|---:|---|
 | `page` | No | Página. Default: `1` |
-| `pageSize` | No | Tamaño de página. Default: `20`; máximo efectivo: `100` |
-| `search` | No | Busca en código o nombre |
-
-Ejemplo:
+| `pageSize` | No | Default: `20`; máximo efectivo: `100` |
+| `search` | No | Busca en `code` o `name` |
 
 ```bash
 curl "http://localhost:3000/api/v1/fleets?search=central&page=1&pageSize=20"
@@ -904,45 +1350,14 @@ curl "http://localhost:3000/api/v1/fleets?search=central&page=1&pageSize=20"
 
 ---
 
-## Consultar flota por ID
+## Consultar y actualizar flotas
 
-### `GET /api/v1/fleets/:fleetID`
-
-```bash
-curl http://localhost:3000/api/v1/fleets/9708aeb7-ad5b-4eac-81af-e19096991e89
+```text
+GET   /api/v1/fleets/:fleetID
+PATCH /api/v1/fleets/:fleetID
 ```
 
-**200 OK**
-
-```json
-{
-  "data": {
-    "id": "9708aeb7-ad5b-4eac-81af-e19096991e89",
-    "code": "FLEET-001",
-    "name": "Flota Central"
-  }
-}
-```
-
----
-
-## Actualizar flota
-
-### `PATCH /api/v1/fleets/:fleetID`
-
-### Request
-
-```json
-{
-  "name": "Flota Región Central"
-}
-```
-
-También se puede actualizar `code`.
-
-### Respuesta esperada
-
-**200 OK**
+`PATCH` acepta `code` y/o `name`:
 
 ```json
 {
@@ -957,265 +1372,124 @@ También se puede actualizar `code`.
 
 ---
 
-## Asignar maquinaria a una flota
-
-### `PUT /api/v1/fleets/:fleetID/equipments/:equipmentID`
-
-No requiere body.
-
-```bash
-curl -X PUT \
-  http://localhost:3000/api/v1/fleets/9708aeb7-ad5b-4eac-81af-e19096991e89/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd5
-```
-
-### Respuesta esperada
-
-**200 OK**
-
-```json
-{
-  "message": "Maquinaria asignada correctamente",
-  "data": {
-    "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-    "fleetId": "9708aeb7-ad5b-4eac-81af-e19096991e89",
-    "status": "AVAILABLE"
-  }
-}
-```
-
-La operación es idempotente si la maquinaria ya pertenece a la misma flota.
-
-No puede asignarse si ya pertenece a otra flota:
-
-**409 Conflict**
-
-```json
-{
-  "error": "equipment_already_assigned",
-  "message": "La maquinaria ya pertenece a otra flota"
-}
-```
-
-Tampoco puede cambiar de flota cuando se encuentra en un estado operativo no permitido.
-
----
-
-## Retirar maquinaria de una flota
-
-### `DELETE /api/v1/fleets/:fleetID/equipments/:equipmentID`
-
-```bash
-curl -i -X DELETE \
-  http://localhost:3000/api/v1/fleets/9708aeb7-ad5b-4eac-81af-e19096991e89/equipments/68dd1b50-d732-4fe3-88e9-fb980e61bdd5
-```
-
-### Respuesta esperada
-
-**204 No Content**
-
-No devuelve body.
-
-La maquinaria solamente puede cambiar de flota cuando está en uno de estos estados:
-
-```text
-AVAILABLE
-MAINTENANCE
-INACTIVE
-```
-
-Ejemplo de rechazo:
-
-**409 Conflict**
-
-```json
-{
-  "error": "equipment_in_operation",
-  "message": "No se puede mover la maquinaria mientras está en operación"
-}
-```
-
----
-
-## Listar maquinaria de una flota
-
-### `GET /api/v1/fleets/:fleetID/equipments`
-
-```bash
-curl http://localhost:3000/api/v1/fleets/9708aeb7-ad5b-4eac-81af-e19096991e89/equipments
-```
-
-### Respuesta esperada
-
-**200 OK**
-
-```json
-{
-  "fleet": {
-    "id": "9708aeb7-ad5b-4eac-81af-e19096991e89",
-    "code": "FLEET-001",
-    "name": "Flota Central"
-  },
-  "data": [
-    {
-      "id": "68dd1b50-d732-4fe3-88e9-fb980e61bdd5",
-      "code": "CAT-320-001",
-      "fleetId": "9708aeb7-ad5b-4eac-81af-e19096991e89",
-      "status": "AVAILABLE"
-    }
-  ]
-}
-```
-
-Si la flota no existe:
-
-**404 Not Found**
-
-```json
-{
-  "error": "fleet_not_found",
-  "message": "La flota no existe"
-}
-```
-
----
-
 # Casos de uso
 
-## Caso 1: Registrar una nueva flota
-
-Un administrador necesita crear una agrupación lógica de maquinaria.
+## Caso 1: Ingresar un vehículo del rastreo satelital
 
 ```text
-POST /api/v1/fleets
+POST /api/v1/vehicles
         │
         ▼
-Se valida code + name
+Se validan description, status, type, year y remoteId
         │
         ▼
-Se registra la flota
+Se registra el vehículo con su group y tags
         │
         ▼
 201 Created
 ```
 
-Ejemplo:
-
 ```bash
-curl -X POST http://localhost:3000/api/v1/fleets \
+curl -X POST http://localhost:3000/api/v1/vehicles \
   -H 'Content-Type: application/json' \
   -d '{
-    "code": "FLEET-001",
-    "name": "Flota Central"
+    "description":"SYN-DEMO-01",
+    "status":"Normal",
+    "type":"Excavadora",
+    "year":2024,
+    "brand":"Caterpillar",
+    "model":"320",
+    "group":"Zona Central",
+    "tags":"excavacion,movimiento-tierra",
+    "driver":"Carlos Méndez",
+    "remoteId":"REMOTE-DEMO-01"
   }'
 ```
 
 ---
 
-## Caso 2: Registrar maquinaria disponible
-
-Al ingresar una nueva máquina al inventario:
+## Caso 2: Enviar un vehículo a mantenimiento y registrar la orden
 
 ```text
-POST /api/v1/equipments
+PATCH /api/v1/vehicles/{id}/status   → status "Mantenimiento"
         │
         ▼
-Estado inicial AVAILABLE
+POST /api/v1/maintenance             → vehicle = description del vehículo
         │
         ▼
-Se calcula nextMaintenanceHours
+GET /api/v1/vehicles/{id}/status-history
+```
+
+El historial queda disponible para auditar cuándo entró y salió de taller.
+
+---
+
+## Caso 3: Programar un traslado
+
+```text
+GET /api/v1/vehicles?status=Normal&type=Excavadora
         │
         ▼
-201 Created
+POST /api/v1/tasks   → origen, destino, fecha y responsable
+        │
+        ▼
+PATCH /api/v1/tasks/{id}  → status "Completada" o "Cancelada"
 ```
 
 ---
 
-## Caso 3: Asignar maquinaria a una flota
-
-Flujo recomendado:
+## Caso 4: Delimitar zonas de proyecto
 
 ```text
-Crear/consultar flota
+POST /api/v1/geofences
         │
         ▼
-Crear/consultar maquinaria
+Se registra la zona con su margen adicional
         │
         ▼
-PUT /fleets/{fleetID}/equipments/{equipmentID}
-        │
-        ▼
-La maquinaria queda asociada a la flota
-```
-
-Antes de asignarla, el servicio verifica:
-
-- que la flota exista;
-- que la maquinaria exista;
-- que no pertenezca a otra flota;
-- que su estado permita modificar la pertenencia a una flota.
-
----
-
-## Caso 4: Ejecutar el ciclo de una operación logística
-
-Un flujo de trabajo típico puede ser:
-
-```text
-AVAILABLE
-   │
-   ▼
-RESERVED
-   │
-   ▼
-IN_TRANSIT
-   │
-   ▼
-WORKING
-   │
-   ▼
-AVAILABLE
-```
-
-Cada cambio se realiza mediante:
-
-```text
-PATCH /api/v1/equipments/:id/status
-```
-
-Después puede consultarse la trazabilidad completa con:
-
-```text
-GET /api/v1/equipments/:id/status-history
+GET /api/v1/geofences?search=San Salvador
 ```
 
 ---
 
-## Caso 5: Enviar maquinaria a mantenimiento
-
-Desde varios estados operativos se permite pasar a `MAINTENANCE`.
-
-Ejemplo:
-
-```json
-{
-  "status": "MAINTENANCE",
-  "reason": "Mantenimiento preventivo de 500 horas"
-}
-```
-
-Cuando la maquinaria está en mantenimiento también puede ser movida entre flotas según las reglas actuales del dominio.
-
----
-
-## Caso 6: Buscar maquinaria disponible para otro servicio
-
-El endpoint de listado permite filtrar el inventario antes de asignarlo:
+## Caso 5: Buscar vehículos disponibles para otro servicio
 
 ```bash
-curl "http://localhost:3000/api/v1/equipments?type=EXCAVATOR&status=AVAILABLE&brand=CAT"
+curl "http://localhost:3000/api/v1/vehicles?type=Excavadora&status=Normal&brand=Caterpillar"
 ```
 
-Esto permite que otros microservicios, por ejemplo un servicio logístico o de recomendaciones, consulten maquinaria candidata sin conocer directamente la base de datos del `fleet-service`.
+Esto permite que otros microservicios de la plataforma, por ejemplo el servicio logístico o el MCP, consulten el inventario sin conocer directamente la base de datos del `fleet-service`.
+
+---
+
+# Carga de datos sintéticos
+
+El script `seed-entropy-synthetic-data.sh` (mantenido fuera de este repositorio, junto a los demás servicios de Entropy) carga un conjunto correlacionado de datos de prueba usando únicamente HTTP.
+
+Contra este servicio ejecuta:
+
+| Recurso | Cantidad aproximada |
+|---|---|
+| `POST /api/v1/vehicles` | 25 vehículos, incluido uno sin pareja en Logistic |
+| `POST /api/v1/maintenance` | 12 órdenes preventivas y correctivas |
+| `POST /api/v1/geofences` | 5 geocercas regionales |
+| `POST /api/v1/tasks` | 4 tareas de traslado en distintos estados |
+
+Además llama a `GET /health` antes de empezar, y coordina cada vehículo con su equivalente en `logistic-service` y con la proyección unificada del `mcp-server`.
+
+Configuración por variables de entorno, sin valores dentro del repositorio:
+
+```bash
+FLEET_URL=http://localhost:3000 \
+LOGISTIC_URL=http://localhost:3001 \
+MCP_URL=http://localhost:3002 \
+SEED_RUN=SYNTH-DEMO \
+./seed-entropy-synthetic-data.sh
+```
+
+`SEED_RUN` identifica la corrida y se incrusta en `description`, `remoteId`, `taskId` y `geofenceId`, de modo que todo el conjunto puede aislarse después con el parámetro `search`.
+
+> El script envía una cabecera `Authorization: Bearer`. Este servicio **no** valida credenciales: la cabecera se ignora. No incrustes tokens reales en scripts versionados.
 
 ---
 
@@ -1227,21 +1501,7 @@ El repositorio incluye:
 fleet-service-test.sh
 ```
 
-El script prueba, entre otras cosas:
-
-- creación de flota;
-- listado y búsqueda;
-- actualización de flota;
-- validación de código duplicado;
-- creación de maquinaria;
-- filtros de maquinaria;
-- actualización de maquinaria;
-- transición de estado inválida;
-- asignación a flota;
-- flujo `AVAILABLE → RESERVED → IN_TRANSIT → WORKING → AVAILABLE`;
-- bloqueo de retiro mientras la maquinaria está en operación;
-- historial de estados;
-- retiro de maquinaria de una flota.
+> **Este script está desactualizado.** Fue escrito para el modelo anterior de maquinaria (`code`, `serialNumber`, `capacityTons`, `engineHours`, estados `AVAILABLE`/`RESERVED`/`WORKING`) y para los endpoints de pertenencia a flota que ya se eliminaron. Falla en el paso 5, al crear maquinaria con el payload antiguo. Ver [Notas conocidas](#notas-conocidas).
 
 Requisitos:
 
@@ -1274,10 +1534,29 @@ También puede indicarse otra URL:
 BASE_URL=http://localhost:3001/api/v1 ./fleet-service-test.sh
 ```
 
-Al finalizar correctamente muestra:
+Mientras tanto, el flujo mínimo puede verificarse a mano:
 
-```text
-Todas las pruebas finalizaron correctamente.
+```bash
+# 1. Crear un vehículo
+curl -X POST http://localhost:3000/api/v1/vehicles \
+  -H 'Content-Type: application/json' \
+  -d '{"description":"SMOKE-01","status":"Normal","type":"Excavadora","year":2024,"remoteId":"REMOTE-SMOKE-01"}'
+
+# 2. Cambiar su estado
+curl -X PATCH http://localhost:3000/api/v1/vehicles/<VEHICLE_ID>/status \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"Mantenimiento","reason":"Prueba de humo"}'
+
+# 3. Consultar el historial
+curl http://localhost:3000/api/v1/vehicles/<VEHICLE_ID>/status-history
+
+# 4. Registrar un mantenimiento
+curl -X POST http://localhost:3000/api/v1/maintenance \
+  -H 'Content-Type: application/json' \
+  -d '{"vehicle":"SMOKE-01","reference":"Orden de prueba","serviceDate":"2026-09-13T00:00:00Z","serviceTime":"08:30","repairReason":"Prueba de humo","odometer":100,"hourMeter":10}'
+
+# 5. Eliminar el vehículo
+curl -i -X DELETE http://localhost:3000/api/v1/vehicles/<VEHICLE_ID>
 ```
 
 ---
@@ -1293,7 +1572,7 @@ Formato general:
 }
 ```
 
-En algunas validaciones también puede incluirse:
+En los errores de binding también se incluye el detalle del validador:
 
 ```json
 {
@@ -1306,19 +1585,20 @@ Errores relevantes:
 | HTTP | Código | Descripción |
 |---:|---|---|
 | `400` | `invalid_request` | Payload inválido |
-| `400` | `invalid_id` | UUID inválido |
-| `400` | `invalid_fleet_id` | `fleetId` inválido |
+| `400` | `invalid_id` | UUID inválido en la ruta |
 | `400` | `empty_update` | PATCH sin campos |
-| `404` | `equipment_not_found` | Maquinaria inexistente |
-| `404` | `fleet_not_found` | Flota inexistente |
-| `404` | `equipment_not_in_fleet` | La maquinaria no pertenece a esa flota |
-| `409` | `equipment_already_exists` | Código o serie duplicados |
+| `404` | `vehicle_not_found` | Vehículo inexistente |
+| `404` | `equipment_not_found` | Vehículo inexistente, devuelto por `GET /vehicles/:id` |
+| `404` | `task_not_found` | Tarea inexistente |
+| `404` | `maintenance_not_found` | Mantenimiento inexistente |
+| `404` | `geofence_not_found` | Geocerca inexistente |
+| `409` | `vehicle_already_exists` | `description` o `remoteId` duplicados |
+| `409` | `task_already_exists` | `taskId` duplicado |
+| `409` | `geofence_already_exists` | `geofenceId` duplicado |
 | `409` | `fleet_already_exists` | Código de flota duplicado |
-| `409` | `equipment_already_assigned` | La maquinaria ya pertenece a otra flota |
-| `409` | `equipment_in_operation` | No puede cambiarse de flota en el estado actual |
-| `409` | `concurrent_status_change` | Otro proceso modificó el estado durante la operación |
-| `422` | `invalid_status_transition` | Transición de estado no permitida |
+| `409` | `invalid_status_change` | El vehículo ya tiene ese estado |
 | `500` | `database_error` | Error interno de persistencia |
+| `500` | `fleet_not_found` | Flota inexistente al actualizar. El código HTTP es incorrecto, ver [Notas conocidas](#notas-conocidas) |
 
 ---
 
@@ -1374,6 +1654,8 @@ En un entorno local autenticado con Google Cloud puede utilizarse, por ejemplo:
 gcloud auth application-default login
 ```
 
+> La instrumentación con spans explícitos está completa en los módulos `equipments` y `fleets`. Los módulos `tasks`, `maintenance` y `geofences` heredan las trazas automáticas de Gin, pero aún no abren spans propios.
+
 ## Logging
 
 Por defecto se utiliza logging local.
@@ -1389,53 +1671,48 @@ GCP_PROJECT_ID=my-gcp-project
 
 # Notas conocidas
 
-La documentación anterior describe la intención funcional del servicio y sus rutas actuales. Durante la revisión del código se detectaron algunos puntos que conviene corregir.
+Puntos detectados durante la revisión del código que conviene tener presentes o corregir.
 
-## Ejemplo rápido de flujo completo
+## Coordenadas del vehículo nunca se guardan
 
-```bash
-# 1. Crear una flota
-curl -X POST http://localhost:3000/api/v1/fleets \
-  -H 'Content-Type: application/json' \
-  -d '{"code":"FLEET-001","name":"Flota Central"}'
+El modelo `Equipment` tiene `location`, `latitude`, `longitude` y `lastPositionAt`, pero los DTO `CreateEquipmentRequest` y `UpdateEquipmentRequest` **no incluyen esos campos**. Si el cliente los envía, Gin los descarta en silencio y el vehículo se persiste con `location: ""`, `latitude: 0`, `longitude: 0` y `lastPositionAt` nulo. El script de datos sintéticos los envía en cada `POST /api/v1/vehicles` y ninguno se almacena.
 
-# 2. Crear maquinaria
-curl -X POST http://localhost:3000/api/v1/equipments \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "code":"CAT-320-001",
-    "type":"EXCAVATOR",
-    "brand":"CAT",
-    "model":"320",
-    "serialNumber":"CAT320-0001",
-    "year":2026,
-    "capacityTons":22,
-    "location":{
-      "name":"San Salvador",
-      "latitude":13.6929,
-      "longitude":-89.2182
-    },
-    "engineHours":120,
-    "maintenanceIntervalHours":250,
-    "fuelPercent":85
-  }'
+## Códigos de error inconsistentes
 
-# 3. Asignar maquinaria a una flota
-curl -X PUT \
-  http://localhost:3000/api/v1/fleets/<FLEET_ID>/equipments/<EQUIPMENT_ID>
+- `GET /api/v1/vehicles/:id` devuelve `equipment_not_found` con el mensaje "La maquinaria no existe"; las demás operaciones usan `vehicle_not_found` y "El vehículo no existe".
+- `GET /api/v1/fleets/:fleetID` devuelve el código `equipment_not_found` con el mensaje "La flota no existe".
 
-# 4. Reservar la maquinaria
-curl -X PATCH \
-  http://localhost:3000/api/v1/equipments/<EQUIPMENT_ID>/status \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "status":"RESERVED",
-    "reason":"Reservada para solicitud logística"
-  }'
+## `PATCH /fleets/:fleetID` responde 500 cuando la flota no existe
 
-# 5. Consultar historial
-curl \
-  http://localhost:3000/api/v1/equipments/<EQUIPMENT_ID>/status-history
+En `internal/fleets/db/postgres/updateFleets.go`, el caso `RowsAffected == 0` construye el error `fleet_not_found` con `http.StatusInternalServerError` en lugar de `http.StatusNotFound`.
+
+## Latitud y longitud cero son rechazadas
+
+En tareas y geocercas, `latitude` y `longitude` son `int64` con la regla `required`. El validador de Gin trata el `0` como valor ausente, así que no es posible registrar un punto exactamente sobre el ecuador o el meridiano de Greenwich.
+
+## Escala de coordenadas no documentada en el contrato
+
+Tareas y geocercas guardan coordenadas como enteros, mientras que el vehículo las guarda como decimales. La carga sintética usa grados × 10⁷, pero el servicio no valida ni convierte la escala: cualquier entero es aceptado.
+
+## Código muerto de la etapa anterior
+
+Quedaron sin uso tras eliminar la pertenencia de maquinaria a flotas:
+
+```text
+internal/validations/fleetMembershipError.go
+internal/validations/fleetId.go
+internal/equipments/dto/createLocations.go
+internal/equipments/dto/updateLocations.go
 ```
 
----
+## `fleet-service-test.sh` desactualizado
+
+El script todavía prueba el modelo anterior (`code`, `serialNumber`, `capacityTons`, transiciones `AVAILABLE → RESERVED → IN_TRANSIT → WORKING`) y los endpoints `PUT`/`DELETE /fleets/:fleetID/equipments/:equipmentID`, que ya no existen. Necesita reescribirse contra los cinco recursos actuales.
+
+## El servicio no valida autenticación
+
+No hay middleware de autenticación ni de API key. Las cabeceras `Authorization` que envían los clientes de integración se ignoran. El control de acceso depende por completo de la capa de red o del gateway que exponga el servicio.
+
+## CORS restringido a un solo origen
+
+`internal/router/cors.go` permite únicamente `http://localhost:8080`. Cualquier frontend desplegado en otro origen será bloqueado por el navegador hasta que se agregue a la lista.

@@ -10,47 +10,16 @@ import (
 	"gorm.io/gorm"
 )
 
-func (pc *PostgresClient) CreateEquipment(data equipments_domain.Equipment, ctx context.Context) *interfaces.Error {
-	operationSpan, spanCtx := pc.trace.StartSpan(ctx, "equipments.database.postgres", map[string]any{
-		"db.name":              "equipments",
-		"db.operation":         "insert",
-		"db.type":              "postgresql",
-		"equipments.code":      data.Code,
-		"equipments.fleet":     data.FleetID,
-		"equipments.createdAt": data.CreatedAt,
-	})
-	defer operationSpan.End()
-
-	result := pc.client.WithContext(spanCtx).Create(&data)
-
-	if result.Error != nil {
-		switch {
-		case errors.Is(result.Error, gorm.ErrDuplicatedKey):
-			pc.logging.LogWarning("equipment_already_exists", nil)
-			return &interfaces.Error{
-				Error:      "equipment_already_exists",
-				Message:    "Ya existe una maquinaria con ese código o número de serie",
-				StatusCode: http.StatusConflict,
-			}
-
-		case errors.Is(result.Error, gorm.ErrForeignKeyViolated):
-			pc.logging.LogWarning("fleet_not_found", nil)
-			return &interfaces.Error{
-				Error:      "fleet_not_found",
-				Message:    "La flota especificada no existe",
-				StatusCode: http.StatusBadRequest,
-			}
-
-		default:
-			pc.logging.LogError("database_error", map[string]any{"error": result.Error})
-			return &interfaces.Error{
-				Error:      "database_error",
-				Message:    "No se pudo registrar la maquinaria",
-				StatusCode: http.StatusInternalServerError,
-			}
-		}
+func (pc *PostgresClient) CreateEquipment(data *equipments_domain.Equipment, ctx context.Context) *interfaces.Error {
+	result := pc.client.WithContext(ctx).Create(data)
+	if result.Error == nil {
+		return nil
 	}
 
-	pc.logging.LogInfo("PostgreSQL insert success", map[string]interface{}{"insertedID": data.ID})
-	return nil
+	if errors.Is(result.Error, gorm.ErrDuplicatedKey) {
+		return &interfaces.Error{Error: "vehicle_already_exists", Message: "Ya existe un vehículo con esa descripción o ID remoto", StatusCode: http.StatusConflict}
+	}
+
+	pc.logging.LogError("database_error", map[string]any{"error": result.Error.Error()})
+	return &interfaces.Error{Error: "database_error", Message: "No se pudo registrar el vehículo", StatusCode: http.StatusInternalServerError}
 }

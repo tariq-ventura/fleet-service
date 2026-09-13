@@ -5,140 +5,49 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	equipments_dto "github.com/tariq-ventura/fleet-service/internal/equipments/dto"
+	"github.com/tariq-ventura/fleet-service/internal/validations"
 )
 
 func (eh *EquipmentHanlder) UpdateEquipments(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_id",
-			"message": "El identificador no es un UUID válido",
-		})
+	id, ok := validations.ParseUUIDParameter(c, "id")
+	if !ok {
 		return
 	}
 
-	span, spanCtx := eh.trace.StartSpan(
-		ctx,
-		"equipments.create_equipment",
-		map[string]any{
-			"http.method":    "PATCH",
-			"http.route":     "/api/v1/equipments/${id}",
-			"http.params.id": id,
-		},
-	)
-	defer span.End()
-
-	var request equipments_dto.UpdateEquipmentRequest
-
-	bindSpan, bindCtx := eh.trace.StartSpan(spanCtx, "equipments.create_equipment.BindJson", nil)
-	bindError := c.ShouldBindJSON(&request)
-	bindSpan.End()
-
-	if bindError != nil {
-		eh.logs.LogWarning("invalid request", map[string]interface{}{"error": err.Error()})
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_request",
-			"message": "Los datos enviados no son válidos",
-			"detail":  bindError.Error(),
-		})
+	var input equipments_dto.UpdateEquipmentRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request", "message": "Los datos enviados no son válidos", "detail": err.Error()})
 		return
 	}
 
 	updates := make(map[string]any)
-
-	if request.FleetID != nil {
-		fleetID, err := uuid.Parse(*request.FleetID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error":   "invalid_fleet_id",
-				"message": "fleetId debe ser un UUID válido",
-			})
-			return
-		}
-
-		updates["fleet_id"] = fleetID
-	}
-
-	if request.Type != nil {
-		updates["type"] = strings.ToUpper(
-			strings.TrimSpace(*request.Type),
-		)
-	}
-
-	if request.Brand != nil {
-		updates["brand"] = strings.TrimSpace(*request.Brand)
-	}
-
-	if request.Model != nil {
-		updates["model"] = strings.TrimSpace(*request.Model)
-	}
-
-	if request.SerialNumber != nil {
-		updates["serial_number"] = strings.ToUpper(
-			strings.TrimSpace(*request.SerialNumber),
-		)
-	}
-
-	if request.Year != nil {
-		updates["year"] = *request.Year
-	}
-
-	if request.CapacityTons != nil {
-		updates["capacity_tons"] = *request.CapacityTons
-	}
-
-	if request.Location != nil {
-		if request.Location.Name != nil {
-			updates["location_name"] = strings.TrimSpace(
-				*request.Location.Name,
-			)
-		}
-
-		if request.Location.Latitude != nil {
-			updates["latitude"] = *request.Location.Latitude
-		}
-
-		if request.Location.Longitude != nil {
-			updates["longitude"] = *request.Location.Longitude
+	addTrimmedString := func(column string, value *string) {
+		if value != nil {
+			updates[column] = strings.TrimSpace(*value)
 		}
 	}
-
+	addTrimmedString("description", input.Description)
+	addTrimmedString("type", input.Type)
+	addTrimmedString("color", input.Color)
+	addTrimmedString("brand", input.Brand)
+	addTrimmedString("model", input.Model)
+	addTrimmedString("group", input.Group)
+	addTrimmedString("tags", input.Tags)
+	addTrimmedString("driver", input.Driver)
+	addTrimmedString("remote_id", input.RemoteID)
+	if input.Year != nil {
+		updates["year"] = *input.Year
+	}
 	if len(updates) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "empty_update",
-			"message": "Debe enviar al menos un campo para actualizar",
-		})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty_update", "message": "Debe enviar al menos un campo"})
 		return
 	}
 
-	dbSpan, dbCtx := eh.trace.StartSpan(bindCtx, "equipments.database.connection", map[string]any{
-		"db.name": "equipments",
-	})
-	database := eh.db
-	dbSpan.End()
-
-	operationSpan, opCtx := eh.trace.StartSpan(dbCtx, "equipments.database.operations", map[string]any{
-		"db.name":      "equipments",
-		"db.operation": "update",
-	})
-	defer operationSpan.End()
-
-	result, erro := database.UpdateEquipments(id, updates, opCtx)
-
-	if erro != nil {
-		c.JSON(erro.StatusCode, gin.H{
-			"error":   erro.Error,
-			"message": erro.Message,
-		})
+	vehicle, responseError := eh.db.UpdateEquipments(id, updates, c.Request.Context())
+	if responseError != nil {
+		c.JSON(responseError.StatusCode, gin.H{"error": responseError.Error, "message": responseError.Message})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Maquinaria actualizada correctamente",
-		"data":    result,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Vehículo actualizado correctamente", "data": vehicle})
 }

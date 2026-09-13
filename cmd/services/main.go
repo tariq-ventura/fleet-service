@@ -30,16 +30,22 @@ func runApp(ctx context.Context, l logging.ILogging, t interfaces.ITrace) error 
 	r.Logging = l
 	r.Trace = t
 
-	database, db, _ := database.SetupDatabase(ctx, l, t)
+	repositories, db, err := database.SetupDatabase(ctx, l, t)
+	if err != nil {
+		return err
+	}
 
-	err := db.MigrateDatabase(ctx)
+	err = db.MigrateDatabase(ctx)
 
 	if err != nil {
 		return err
 	}
 
-	r.EquipmentsDB = database.Equipments
-	r.FleetsDB = database.Fleets
+	r.EquipmentsDB = repositories.Equipments
+	r.FleetsDB = repositories.Fleets
+	r.GeofencesDB = repositories.Geofences
+	r.TasksDB = repositories.Tasks
+	r.MaintenanceDB = repositories.Maintenance
 
 	r.Routes = r.SetupRouter()
 	r.Run()
